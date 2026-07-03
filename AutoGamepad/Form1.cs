@@ -35,6 +35,13 @@ namespace AutoGamepad
                 return;
             }
 
+            // Trava de Segurança: Obriga a conectar antes de dar Start
+            if (!chkConnect.Checked || _controller == null)
+            {
+                MessageBox.Show("Você precisa conectar o controle virtual primeiro (Botão no topo).", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
             // Trava os botões para o usuário não clicar duas vezes
             ToggleUI(false);
             rtbLog.Clear();
@@ -47,7 +54,7 @@ namespace AutoGamepad
 
             try
             {
-                // Inicia o motor principal (Lógica isolada para não travar a tela)
+                // Inicia o motor principal
                 await RunAutomationAsync(_cancellationTokenSource.Token);
             }
             catch (OperationCanceledException)
@@ -56,50 +63,40 @@ namespace AutoGamepad
             }
             catch (Exception ex)
             {
-                Log($"[ERRO FATAL] {ex.Message}");
-                MessageBox.Show("Verifique se o driver ViGEmBus está instalado no Windows.\n\nDetalhes:\n" + ex.Message, "Erro no Driver", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Log($"[ERRO] {ex.Message}");
             }
             finally
             {
-                // Sempre que terminar (com sucesso, erro ou cancelamento), limpa tudo
-                DisconnectController();
+                // Limpa apenas a UI
                 ToggleUI(true);
-                Log("Automação finalizada e controle desconectado.");
+                Log("Ciclo de automação finalizado.");
             }
         }
 
+
         // --- BOTÃO PARAR ---
-        // Se você ainda não deu 2 cliques nele no design, o Visual Studio vai reconhecer 
-        // esse código automaticamente, mas você pode precisar dar 2 cliques lá e colar só o código de dentro.
         private void btnStop_Click(object sender, EventArgs e)
         {
             Log("Solicitando parada imediata...");
             _cancellationTokenSource?.Cancel(); // Avisa o loop para abortar
         }
 
-        // --- O CÉREBRO DA AUTOMAÇÃO ---
+        // --- A AUTOMAÇÃO ---
         private async Task RunAutomationAsync(CancellationToken token)
         {
-            // 1. Conecta o controle virtual
-            Log("Iniciando driver do controle virtual...");
-            _client = new ViGEmClient();
-            _controller = _client.CreateXbox360Controller();
-            _controller.Connect();
-            Log("[SUCESSO] Controle de Xbox conectado no Windows.");
-
-            // 2. Lê as configurações da tela
+            // 1. Lê as configurações da tela
             int initialDelay = (int)numInitialDelay.Value * 1000; // Segundos para Milissegundos
             int maxCycles = (int)numMaxCycles.Value;
             Xbox360Button selectedButton = GetSelectedButton();
 
-            // 3. Atraso Inicial (Para você dar Alt+Tab)
+            // 2. Atraso Inicial (Para você dar Alt+Tab)
             if (initialDelay > 0)
             {
                 Log($"Aguardando {initialDelay / 1000} segundos para iniciar... Vá para o jogo!");
-                await Task.Delay(initialDelay, token); // Passar o 'token' faz ele abortar o sono se você clicar em Parar
+                await Task.Delay(initialDelay, token);
             }
 
-            // 4. O Loop Principal
+            // 3. O Loop Principal
             int currentCycle = 1;
             while (!token.IsCancellationRequested)
             {
@@ -116,8 +113,8 @@ namespace AutoGamepad
                 Log($"\n--- Ciclo {currentCycle} ---");
                 Log($"[*] Pressionando botão [{cmbButtonConfig.Text}] por {holdTime} ms.");
 
-                // Aperta
-                _controller.SetButtonState(selectedButton, true);
+                // Aperta (O ! após o _controller serve para afirmar ao compilador que sabemos que ele não é nulo aqui)
+                _controller!.SetButtonState(selectedButton, true);
                 await Task.Delay(holdTime, token);
 
                 // Solta
@@ -171,6 +168,9 @@ namespace AutoGamepad
             btnStart.Enabled = isIdle;
             btnStop.Enabled = !isIdle; // Habilita o Stop apenas quando está rodando
 
+            // Impede o usuário de desconectar o controle no meio da execução
+            chkConnect.Enabled = isIdle;
+
             numHoldMin.Enabled = isIdle;
             numHoldMax.Enabled = isIdle;
             numWaitMin.Enabled = isIdle;
@@ -193,6 +193,37 @@ namespace AutoGamepad
             _cancellationTokenSource?.Cancel();
             DisconnectController();
             base.OnFormClosing(e);
+        }
+
+        private void chkConnect_CheckedChanged(object sender, EventArgs e)
+        {
+            if (chkConnect.Checked)
+            {
+                // Conectar
+                try
+                {
+                    Log("Iniciando driver do controle virtual...");
+                    _client = new ViGEmClient();
+                    _controller = _client.CreateXbox360Controller();
+                    _controller.Connect();
+
+                    chkConnect.Text = "✅ Controle Conectado";
+                    Log("[SUCESSO] Controle de Xbox conectado no Windows.");
+                }
+                catch (Exception ex)
+                {
+                    chkConnect.Checked = false; // Desmarca se der erro
+                    Log($"[ERRO FATAL] {ex.Message}");
+                    MessageBox.Show("Verifique se o driver ViGEmBus está instalado.", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+            else
+            {
+                // Desconectar
+                DisconnectController();
+                chkConnect.Text = "🔌 Conectar Controle Virtual";
+                Log("[INFO] Controle desconectado com segurança.");
+            }
         }
     }
 }

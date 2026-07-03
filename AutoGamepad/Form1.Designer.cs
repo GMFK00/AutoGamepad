@@ -44,6 +44,7 @@
             numMaxCycles = new NumericUpDown();
             label5 = new Label();
             label6 = new Label();
+            chkConnect = new CheckBox();
             ((System.ComponentModel.ISupportInitialize)numHoldMin).BeginInit();
             ((System.ComponentModel.ISupportInitialize)numHoldMax).BeginInit();
             ((System.ComponentModel.ISupportInitialize)numWaitMin).BeginInit();
@@ -159,10 +160,10 @@
             // 
             rtbLog.BackColor = SystemColors.ControlDark;
             rtbLog.Dock = DockStyle.Bottom;
-            rtbLog.Location = new Point(0, 221);
+            rtbLog.Location = new Point(0, 191);
             rtbLog.Name = "rtbLog";
             rtbLog.ReadOnly = true;
-            rtbLog.Size = new Size(580, 120);
+            rtbLog.Size = new Size(682, 150);
             rtbLog.TabIndex = 12;
             rtbLog.Text = "";
             // 
@@ -201,11 +202,25 @@
             label6.TabIndex = 16;
             label6.Text = "Cycles:";
             // 
+            // chkConnect
+            // 
+            chkConnect.Appearance = Appearance.Button;
+            chkConnect.AutoSize = true;
+            chkConnect.Location = new Point(453, 11);
+            chkConnect.Name = "chkConnect";
+            chkConnect.Size = new Size(211, 30);
+            chkConnect.TabIndex = 17;
+            chkConnect.Text = "🔌 Conectar Controle Virtual";
+            chkConnect.TextAlign = ContentAlignment.MiddleCenter;
+            chkConnect.UseVisualStyleBackColor = true;
+            chkConnect.CheckedChanged += chkConnect_CheckedChanged;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(580, 341);
+            ClientSize = new Size(682, 341);
+            Controls.Add(chkConnect);
             Controls.Add(label6);
             Controls.Add(label5);
             Controls.Add(numMaxCycles);
@@ -223,7 +238,7 @@
             Controls.Add(btnStop);
             Controls.Add(btnStart);
             Name = "Form1";
-            Text = "Form1";
+            Text = "AutoGamepad";
             ((System.ComponentModel.ISupportInitialize)numHoldMin).EndInit();
             ((System.ComponentModel.ISupportInitialize)numHoldMax).EndInit();
             ((System.ComponentModel.ISupportInitialize)numWaitMin).EndInit();
@@ -252,5 +267,6 @@
         private NumericUpDown numMaxCycles;
         private Label label5;
         private Label label6;
+        private CheckBox chkConnect;
     }
 }
