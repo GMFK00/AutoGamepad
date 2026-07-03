@@ -5,6 +5,7 @@ using System.Windows.Forms;
 using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
+using System.Runtime.InteropServices;
 
 namespace AutoGamepad
 {
@@ -16,6 +17,21 @@ namespace AutoGamepad
         private CancellationTokenSource? _cancellationTokenSource;
         private Random _rnd = new Random();
 
+        // --- HOTKEYS GLOBAIS DO WINDOWS ---
+        [DllImport("user32.dll")]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
+
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+
+        // Constantes para as teclas e modificadores
+        private const int HOTKEY_ID_START = 1;
+        private const int HOTKEY_ID_STOP = 2;
+        private const int VK_F9 = 0x78;  // F9
+        private const int VK_F10 = 0x79; // F10
+        private const int MOD_CONTROL = 0x0002; // Tecla CTRL
+        private const int MOD_SHIFT = 0x0004;   // Tecla SHIFT
+
         public Form1()
         {
             InitializeComponent();
@@ -23,6 +39,35 @@ namespace AutoGamepad
             // Seleciona o primeiro item da lista do ComboBox por padrão ao abrir
             if (cmbButtonConfig.Items.Count > 0)
                 cmbButtonConfig.SelectedIndex = 0;
+
+            // Adiciona as Hotkeys: CTRL + SHIFT + F9 | CTRL + SHIFT + F10
+            // O operador '|' soma os bits do Control e do Shift
+            RegisterHotKey(this.Handle, HOTKEY_ID_START, MOD_CONTROL | MOD_SHIFT, VK_F9);
+            RegisterHotKey(this.Handle, HOTKEY_ID_STOP, MOD_CONTROL | MOD_SHIFT, VK_F10);
+
+            Log("Atalhos globais ativados: [Ctrl+Shift+F9] Iniciar | [Ctrl+Shift+F10] Parar");
+        }
+
+        // --- INTERCEPTADOR DO TECLADO ---
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_HOTKEY = 0x0312; // Código do Windows para "Hotkey pressionada"
+
+            if (m.Msg == WM_HOTKEY)
+            {
+                int id = m.WParam.ToInt32();
+
+                if (id == HOTKEY_ID_START && btnStart.Enabled)
+                {
+                    btnStart.PerformClick(); // Simula um clique real no botão "Iniciar"
+                }
+                else if (id == HOTKEY_ID_STOP && btnStop.Enabled)
+                {
+                    btnStop.PerformClick(); // Simula um clique real no botão "Parar"
+                }
+            }
+
+            base.WndProc(ref m);
         }
 
         // --- BOTÃO INICIAR ---
@@ -72,7 +117,6 @@ namespace AutoGamepad
                 Log("Ciclo de automação finalizado.");
             }
         }
-
 
         // --- BOTÃO PARAR ---
         private void btnStop_Click(object sender, EventArgs e)
@@ -187,11 +231,16 @@ namespace AutoGamepad
             rtbLog.ScrollToCaret();
         }
 
-        // Evento que ocorre quando o usuário clica no "X" vermelho da janela pra fechar
+        // Evento que ocorre quando o usuário clica no "X" para fechar a janela
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             _cancellationTokenSource?.Cancel();
             DisconnectController();
+
+            // Devolve as teclas pro Windows ao fechar o programa
+            UnregisterHotKey(this.Handle, HOTKEY_ID_START);
+            UnregisterHotKey(this.Handle, HOTKEY_ID_STOP);
+
             base.OnFormClosing(e);
         }
 
