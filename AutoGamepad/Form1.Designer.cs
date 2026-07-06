@@ -30,186 +30,73 @@
         {
             btnStart = new Button();
             btnStop = new Button();
-            cmbButtonConfig = new ComboBox();
-            numHoldMin = new NumericUpDown();
-            numHoldMax = new NumericUpDown();
-            numWaitMin = new NumericUpDown();
-            numWaitMax = new NumericUpDown();
-            label1 = new Label();
-            label2 = new Label();
-            label3 = new Label();
-            label4 = new Label();
             rtbLog = new RichTextBox();
-            numInitialDelay = new NumericUpDown();
-            numMaxCycles = new NumericUpDown();
-            label5 = new Label();
-            label6 = new Label();
             chkConnect = new CheckBox();
             chkSound = new CheckBox();
-            ((System.ComponentModel.ISupportInitialize)numHoldMin).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numHoldMax).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numWaitMin).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numWaitMax).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numInitialDelay).BeginInit();
-            ((System.ComponentModel.ISupportInitialize)numMaxCycles).BeginInit();
+            tabEditor = new TabControl();
+            tabPage1 = new TabPage();
+            tabPage2 = new TabPage();
+            gridSequence = new DataGridView();
+            colAction = new DataGridViewComboBoxColumn();
+            colButton = new DataGridViewComboBoxColumn();
+            colValue = new DataGridViewTextBoxColumn();
+            colMinTime = new DataGridViewTextBoxColumn();
+            colMaxTime = new DataGridViewTextBoxColumn();
+            colJitter = new DataGridViewTextBoxColumn();
+            btnRowAdd = new Button();
+            btnRowRemove = new Button();
+            btnRowUp = new Button();
+            btnRowDown = new Button();
+            txtJsonCode = new RichTextBox();
+            btnJsonCopy = new Button();
+            btnJsonPaste = new Button();
+            btnJsonValidate = new Button();
+            button1 = new Button();
+            button2 = new Button();
+            tabEditor.SuspendLayout();
+            tabPage1.SuspendLayout();
+            tabPage2.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)gridSequence).BeginInit();
             SuspendLayout();
             // 
             // btnStart
             // 
-            btnStart.Location = new Point(12, 12);
+            btnStart.Location = new Point(221, 5);
             btnStart.Name = "btnStart";
-            btnStart.Size = new Size(154, 29);
+            btnStart.Size = new Size(119, 43);
             btnStart.TabIndex = 0;
-            btnStart.Text = "Iniciar Automação";
+            btnStart.Text = "▶ Iniciar";
             btnStart.UseVisualStyleBackColor = true;
             btnStart.Click += btnStart_Click;
             // 
             // btnStop
             // 
             btnStop.Enabled = false;
-            btnStop.Location = new Point(172, 13);
+            btnStop.Location = new Point(346, 5);
             btnStop.Name = "btnStop";
-            btnStop.Size = new Size(94, 29);
+            btnStop.Size = new Size(119, 43);
             btnStop.TabIndex = 1;
             btnStop.Text = "Parar";
             btnStop.UseVisualStyleBackColor = true;
             btnStop.Click += btnStop_Click;
             // 
-            // cmbButtonConfig
-            // 
-            cmbButtonConfig.DropDownStyle = ComboBoxStyle.DropDownList;
-            cmbButtonConfig.FormattingEnabled = true;
-            cmbButtonConfig.Items.AddRange(new object[] { "A", "B", "X", "Y", "D-Pad Cima", "D-Pad Baixo", "D-Pad Esquerda", "D-Pad Direita" });
-            cmbButtonConfig.Location = new Point(272, 13);
-            cmbButtonConfig.Name = "cmbButtonConfig";
-            cmbButtonConfig.Size = new Size(175, 28);
-            cmbButtonConfig.TabIndex = 2;
-            // 
-            // numHoldMin
-            // 
-            numHoldMin.Location = new Point(116, 89);
-            numHoldMin.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
-            numHoldMin.Name = "numHoldMin";
-            numHoldMin.Size = new Size(150, 27);
-            numHoldMin.TabIndex = 3;
-            numHoldMin.Value = new decimal(new int[] { 80, 0, 0, 0 });
-            // 
-            // numHoldMax
-            // 
-            numHoldMax.Location = new Point(116, 122);
-            numHoldMax.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
-            numHoldMax.Name = "numHoldMax";
-            numHoldMax.Size = new Size(150, 27);
-            numHoldMax.TabIndex = 4;
-            numHoldMax.Value = new decimal(new int[] { 120, 0, 0, 0 });
-            // 
-            // numWaitMin
-            // 
-            numWaitMin.Location = new Point(116, 155);
-            numWaitMin.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
-            numWaitMin.Name = "numWaitMin";
-            numWaitMin.Size = new Size(150, 27);
-            numWaitMin.TabIndex = 5;
-            numWaitMin.Value = new decimal(new int[] { 2000, 0, 0, 0 });
-            // 
-            // numWaitMax
-            // 
-            numWaitMax.Location = new Point(116, 188);
-            numWaitMax.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
-            numWaitMax.Name = "numWaitMax";
-            numWaitMax.Size = new Size(150, 27);
-            numWaitMax.TabIndex = 6;
-            numWaitMax.Value = new decimal(new int[] { 5000, 0, 0, 0 });
-            // 
-            // label1
-            // 
-            label1.AutoSize = true;
-            label1.Location = new Point(12, 91);
-            label1.Name = "label1";
-            label1.Size = new Size(74, 20);
-            label1.TabIndex = 8;
-            label1.Text = "Hold Min:";
-            // 
-            // label2
-            // 
-            label2.AutoSize = true;
-            label2.Location = new Point(12, 124);
-            label2.Name = "label2";
-            label2.Size = new Size(77, 20);
-            label2.TabIndex = 9;
-            label2.Text = "Hold Max:";
-            // 
-            // label3
-            // 
-            label3.AutoSize = true;
-            label3.Location = new Point(12, 157);
-            label3.Name = "label3";
-            label3.Size = new Size(71, 20);
-            label3.TabIndex = 10;
-            label3.Text = "Wait Min:";
-            // 
-            // label4
-            // 
-            label4.AutoSize = true;
-            label4.Location = new Point(12, 190);
-            label4.Name = "label4";
-            label4.Size = new Size(74, 20);
-            label4.TabIndex = 11;
-            label4.Text = "Wait Max:";
-            // 
             // rtbLog
             // 
             rtbLog.BackColor = SystemColors.ControlDark;
             rtbLog.Dock = DockStyle.Bottom;
-            rtbLog.Location = new Point(0, 244);
+            rtbLog.Location = new Point(0, 499);
             rtbLog.Name = "rtbLog";
             rtbLog.ReadOnly = true;
-            rtbLog.Size = new Size(682, 150);
+            rtbLog.Size = new Size(1186, 150);
             rtbLog.TabIndex = 12;
             rtbLog.Text = "";
-            // 
-            // numInitialDelay
-            // 
-            numInitialDelay.Location = new Point(394, 89);
-            numInitialDelay.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
-            numInitialDelay.Name = "numInitialDelay";
-            numInitialDelay.Size = new Size(150, 27);
-            numInitialDelay.TabIndex = 13;
-            numInitialDelay.Value = new decimal(new int[] { 5, 0, 0, 0 });
-            // 
-            // numMaxCycles
-            // 
-            numMaxCycles.Location = new Point(394, 122);
-            numMaxCycles.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
-            numMaxCycles.Name = "numMaxCycles";
-            numMaxCycles.Size = new Size(150, 27);
-            numMaxCycles.TabIndex = 14;
-            // 
-            // label5
-            // 
-            label5.AutoSize = true;
-            label5.Location = new Point(321, 91);
-            label5.Name = "label5";
-            label5.Size = new Size(50, 20);
-            label5.TabIndex = 15;
-            label5.Text = "Delay:";
-            // 
-            // label6
-            // 
-            label6.AutoSize = true;
-            label6.Location = new Point(321, 124);
-            label6.Name = "label6";
-            label6.Size = new Size(53, 20);
-            label6.TabIndex = 16;
-            label6.Text = "Cycles:";
             // 
             // chkConnect
             // 
             chkConnect.Appearance = Appearance.Button;
-            chkConnect.AutoSize = true;
-            chkConnect.Location = new Point(453, 11);
+            chkConnect.Location = new Point(4, 5);
             chkConnect.Name = "chkConnect";
-            chkConnect.Size = new Size(211, 30);
+            chkConnect.Size = new Size(211, 43);
             chkConnect.TabIndex = 17;
             chkConnect.Text = "🔌 Conectar Controle Virtual";
             chkConnect.TextAlign = ContentAlignment.MiddleCenter;
@@ -221,44 +108,223 @@
             chkSound.AutoSize = true;
             chkSound.Checked = true;
             chkSound.CheckState = CheckState.Checked;
-            chkSound.Location = new Point(12, 47);
+            chkSound.Location = new Point(471, 15);
             chkSound.Name = "chkSound";
             chkSound.Size = new Size(129, 24);
             chkSound.TabIndex = 18;
             chkSound.Text = "🔊 Emitir Som";
             chkSound.UseVisualStyleBackColor = true;
             // 
+            // tabEditor
+            // 
+            tabEditor.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            tabEditor.Controls.Add(tabPage1);
+            tabEditor.Controls.Add(tabPage2);
+            tabEditor.Location = new Point(0, 54);
+            tabEditor.Name = "tabEditor";
+            tabEditor.SelectedIndex = 0;
+            tabEditor.Size = new Size(1186, 439);
+            tabEditor.TabIndex = 19;
+            // 
+            // tabPage1
+            // 
+            tabPage1.Controls.Add(btnRowDown);
+            tabPage1.Controls.Add(btnRowUp);
+            tabPage1.Controls.Add(btnRowRemove);
+            tabPage1.Controls.Add(btnRowAdd);
+            tabPage1.Controls.Add(gridSequence);
+            tabPage1.Location = new Point(4, 29);
+            tabPage1.Name = "tabPage1";
+            tabPage1.Padding = new Padding(3);
+            tabPage1.Size = new Size(1178, 406);
+            tabPage1.TabIndex = 0;
+            tabPage1.Text = "Visual (Tabela)";
+            tabPage1.UseVisualStyleBackColor = true;
+            // 
+            // tabPage2
+            // 
+            tabPage2.Controls.Add(btnJsonValidate);
+            tabPage2.Controls.Add(btnJsonPaste);
+            tabPage2.Controls.Add(btnJsonCopy);
+            tabPage2.Controls.Add(txtJsonCode);
+            tabPage2.Location = new Point(4, 29);
+            tabPage2.Name = "tabPage2";
+            tabPage2.Padding = new Padding(3);
+            tabPage2.Size = new Size(1178, 406);
+            tabPage2.TabIndex = 1;
+            tabPage2.Text = "Código (JSON)";
+            tabPage2.UseVisualStyleBackColor = true;
+            // 
+            // gridSequence
+            // 
+            gridSequence.AllowUserToAddRows = false;
+            gridSequence.AllowUserToDeleteRows = false;
+            gridSequence.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            gridSequence.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colValue, colMinTime, colMaxTime, colJitter });
+            gridSequence.Location = new Point(3, 6);
+            gridSequence.MinimumSize = new Size(0, 188);
+            gridSequence.MultiSelect = false;
+            gridSequence.Name = "gridSequence";
+            gridSequence.RowHeadersWidth = 51;
+            gridSequence.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            gridSequence.Size = new Size(1042, 394);
+            gridSequence.TabIndex = 0;
+            // 
+            // colAction
+            // 
+            colAction.HeaderText = "Ação";
+            colAction.MinimumWidth = 6;
+            colAction.Name = "colAction";
+            colAction.Width = 125;
+            // 
+            // colButton
+            // 
+            colButton.HeaderText = "Botão/Eixo";
+            colButton.MinimumWidth = 6;
+            colButton.Name = "colButton";
+            colButton.Width = 125;
+            // 
+            // colValue
+            // 
+            colValue.HeaderText = "Valor Eixo (0-255)";
+            colValue.MinimumWidth = 6;
+            colValue.Name = "colValue";
+            colValue.Width = 125;
+            // 
+            // colMinTime
+            // 
+            colMinTime.HeaderText = "Tempo Min (ms)";
+            colMinTime.MinimumWidth = 6;
+            colMinTime.Name = "colMinTime";
+            colMinTime.Width = 125;
+            // 
+            // colMaxTime
+            // 
+            colMaxTime.HeaderText = "Tempo Max (ms)";
+            colMaxTime.MinimumWidth = 6;
+            colMaxTime.Name = "colMaxTime";
+            colMaxTime.Width = 125;
+            // 
+            // colJitter
+            // 
+            colJitter.HeaderText = "Tremor Eixo (Jitter)";
+            colJitter.MinimumWidth = 6;
+            colJitter.Name = "colJitter";
+            colJitter.Width = 125;
+            // 
+            // btnRowAdd
+            // 
+            btnRowAdd.Location = new Point(1051, 6);
+            btnRowAdd.Name = "btnRowAdd";
+            btnRowAdd.Size = new Size(119, 43);
+            btnRowAdd.TabIndex = 1;
+            btnRowAdd.Text = "➕ Adicionar";
+            btnRowAdd.UseVisualStyleBackColor = true;
+            // 
+            // btnRowRemove
+            // 
+            btnRowRemove.Location = new Point(1051, 55);
+            btnRowRemove.Name = "btnRowRemove";
+            btnRowRemove.Size = new Size(119, 43);
+            btnRowRemove.TabIndex = 2;
+            btnRowRemove.Text = "🗑️ Remover";
+            btnRowRemove.UseVisualStyleBackColor = true;
+            // 
+            // btnRowUp
+            // 
+            btnRowUp.Location = new Point(1051, 104);
+            btnRowUp.Name = "btnRowUp";
+            btnRowUp.Size = new Size(119, 43);
+            btnRowUp.TabIndex = 3;
+            btnRowUp.Text = "⬆️ Subir";
+            btnRowUp.UseVisualStyleBackColor = true;
+            // 
+            // btnRowDown
+            // 
+            btnRowDown.Location = new Point(1051, 151);
+            btnRowDown.Name = "btnRowDown";
+            btnRowDown.Size = new Size(119, 43);
+            btnRowDown.TabIndex = 4;
+            btnRowDown.Text = "⬇️ Descer";
+            btnRowDown.UseVisualStyleBackColor = true;
+            // 
+            // txtJsonCode
+            // 
+            txtJsonCode.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            txtJsonCode.BackColor = Color.Black;
+            txtJsonCode.Font = new Font("Consolas", 10.2F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtJsonCode.ForeColor = Color.White;
+            txtJsonCode.Location = new Point(6, 6);
+            txtJsonCode.Name = "txtJsonCode";
+            txtJsonCode.Size = new Size(1041, 394);
+            txtJsonCode.TabIndex = 0;
+            txtJsonCode.Text = "";
+            // 
+            // btnJsonCopy
+            // 
+            btnJsonCopy.Location = new Point(1053, 6);
+            btnJsonCopy.Name = "btnJsonCopy";
+            btnJsonCopy.Size = new Size(119, 43);
+            btnJsonCopy.TabIndex = 1;
+            btnJsonCopy.Text = "📋 Copiar";
+            btnJsonCopy.UseVisualStyleBackColor = true;
+            // 
+            // btnJsonPaste
+            // 
+            btnJsonPaste.Location = new Point(1053, 55);
+            btnJsonPaste.Name = "btnJsonPaste";
+            btnJsonPaste.Size = new Size(119, 43);
+            btnJsonPaste.TabIndex = 2;
+            btnJsonPaste.Text = "📝 Colar";
+            btnJsonPaste.UseVisualStyleBackColor = true;
+            // 
+            // btnJsonValidate
+            // 
+            btnJsonValidate.Location = new Point(1053, 104);
+            btnJsonValidate.Name = "btnJsonValidate";
+            btnJsonValidate.Size = new Size(119, 43);
+            btnJsonValidate.TabIndex = 3;
+            btnJsonValidate.Text = "✅ Checar";
+            btnJsonValidate.UseVisualStyleBackColor = true;
+            // 
+            // button1
+            // 
+            button1.Location = new Point(930, 5);
+            button1.Name = "button1";
+            button1.Size = new Size(119, 43);
+            button1.TabIndex = 20;
+            button1.Text = "💾 Salvar";
+            button1.UseVisualStyleBackColor = true;
+            // 
+            // button2
+            // 
+            button2.Location = new Point(1055, 5);
+            button2.Name = "button2";
+            button2.Size = new Size(119, 43);
+            button2.TabIndex = 21;
+            button2.Text = "📂 Carregar";
+            button2.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(682, 394);
+            ClientSize = new Size(1186, 649);
+            Controls.Add(button2);
+            Controls.Add(button1);
+            Controls.Add(tabEditor);
             Controls.Add(chkSound);
             Controls.Add(chkConnect);
-            Controls.Add(label6);
-            Controls.Add(label5);
-            Controls.Add(numMaxCycles);
-            Controls.Add(numInitialDelay);
             Controls.Add(rtbLog);
-            Controls.Add(label4);
-            Controls.Add(label3);
-            Controls.Add(label2);
-            Controls.Add(label1);
-            Controls.Add(numWaitMax);
-            Controls.Add(numWaitMin);
-            Controls.Add(numHoldMax);
-            Controls.Add(numHoldMin);
-            Controls.Add(cmbButtonConfig);
             Controls.Add(btnStop);
             Controls.Add(btnStart);
             Name = "Form1";
             Text = "AutoGamepad";
-            ((System.ComponentModel.ISupportInitialize)numHoldMin).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numHoldMax).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numWaitMin).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numWaitMax).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numInitialDelay).EndInit();
-            ((System.ComponentModel.ISupportInitialize)numMaxCycles).EndInit();
+            tabEditor.ResumeLayout(false);
+            tabPage1.ResumeLayout(false);
+            tabPage2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)gridSequence).EndInit();
             ResumeLayout(false);
             PerformLayout();
         }
@@ -267,21 +333,28 @@
 
         private Button btnStart;
         private Button btnStop;
-        private ComboBox cmbButtonConfig;
-        private NumericUpDown numHoldMin;
-        private NumericUpDown numHoldMax;
-        private NumericUpDown numWaitMin;
-        private NumericUpDown numWaitMax;
-        private Label label1;
-        private Label label2;
-        private Label label3;
-        private Label label4;
         private RichTextBox rtbLog;
-        private NumericUpDown numInitialDelay;
-        private NumericUpDown numMaxCycles;
-        private Label label5;
-        private Label label6;
         private CheckBox chkConnect;
         private CheckBox chkSound;
+        private TabControl tabEditor;
+        private TabPage tabPage1;
+        private TabPage tabPage2;
+        private DataGridView gridSequence;
+        private DataGridViewComboBoxColumn colAction;
+        private DataGridViewComboBoxColumn colButton;
+        private DataGridViewTextBoxColumn colValue;
+        private DataGridViewTextBoxColumn colMinTime;
+        private DataGridViewTextBoxColumn colMaxTime;
+        private DataGridViewTextBoxColumn colJitter;
+        private Button btnRowDown;
+        private Button btnRowUp;
+        private Button btnRowRemove;
+        private Button btnRowAdd;
+        private RichTextBox txtJsonCode;
+        private Button btnJsonValidate;
+        private Button btnJsonPaste;
+        private Button btnJsonCopy;
+        private Button button1;
+        private Button button2;
     }
 }
