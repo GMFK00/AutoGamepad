@@ -150,6 +150,7 @@
             btnRowDown.TabIndex = 4;
             btnRowDown.Text = "⬇️ Descer";
             btnRowDown.UseVisualStyleBackColor = true;
+            btnRowDown.Click += btnRowDown_Click;
             // 
             // btnRowUp
             // 
@@ -160,6 +161,7 @@
             btnRowUp.TabIndex = 3;
             btnRowUp.Text = "⬆️ Subir";
             btnRowUp.UseVisualStyleBackColor = true;
+            btnRowUp.Click += btnRowUp_Click;
             // 
             // btnRowRemove
             // 

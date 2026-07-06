@@ -339,29 +339,37 @@ namespace AutoGamepad
             // Ignora se o usuário clicou no cabeçalho (linha -1)
             if (e.RowIndex < 0) return;
 
-            // Se a coluna que o usuário acabou de alterar for a coluna "Botão/Eixo" (colButton)
+            // Se a coluna alterada for "Botão/Eixo" (colButton)
             if (gridSequence.Columns[e.ColumnIndex].Name == "colButton")
             {
-                // Pega o texto do botão escolhido
                 var selectedButton = gridSequence.Rows[e.RowIndex].Cells["colButton"].Value?.ToString();
 
-                // Pega a célula do "Valor Eixo" da mesma linha, para travar ou destravar
+                // Pega duas células: O Valor e o Tremor(Jitter)
                 var valueCell = gridSequence.Rows[e.RowIndex].Cells["colValue"];
+                var jitterCell = gridSequence.Rows[e.RowIndex].Cells["colJitter"];
 
                 // Checa se a palavra contém "Gatilho" ou "Analógico"
                 if (selectedButton != null && (selectedButton.Contains("Gatilho") || selectedButton.Contains("Analógico")))
                 {
-                    // É um eixo. Libera para o usuário digitar.
+                    // É um eixo. Libera tudo.
                     valueCell.ReadOnly = false;
-                    valueCell.Style.BackColor = System.Drawing.Color.White; // Fica branco normal
-                    if (valueCell.Value?.ToString() == "-") valueCell.Value = "100"; // Põe 100 por padrão
+                    valueCell.Style.BackColor = System.Drawing.Color.White;
+                    if (valueCell.Value?.ToString() == "-") valueCell.Value = "100";
+
+                    jitterCell.ReadOnly = false;
+                    jitterCell.Style.BackColor = System.Drawing.Color.White;
+                    if (jitterCell.Value?.ToString() == "-") jitterCell.Value = "0"; // Tremor 0 por padrão
                 }
                 else
                 {
-                    // É um botão normal ou pausa. Bloqueia a edição.
+                    // É um botão normal ou pausa. Bloqueia tudo.
                     valueCell.ReadOnly = true;
-                    valueCell.Style.BackColor = System.Drawing.Color.LightGray; // Pinta de cinza
-                    valueCell.Value = "-"; // Coloca um tracinho pra mostrar que não é utilizável
+                    valueCell.Style.BackColor = System.Drawing.Color.LightGray;
+                    valueCell.Value = "-";
+
+                    jitterCell.ReadOnly = true;
+                    jitterCell.Style.BackColor = System.Drawing.Color.LightGray;
+                    jitterCell.Value = "-";
                 }
             }
         }
@@ -441,6 +449,50 @@ namespace AutoGamepad
                     }
                 }
             }
+        }
+
+        // --- BOTÃO: SUBIR LINHA ---
+        private void btnRowUp_Click(object sender, EventArgs e)
+        {
+            // Checa se tem alguma linha selecionada
+            if (gridSequence.SelectedRows.Count == 0) return;
+
+            int rowIndex = gridSequence.SelectedRows[0].Index;
+
+            // Se já for a primeira linha (0), não tem pra onde subir, então aborta
+            if (rowIndex == 0) return;
+
+            MoveRow(rowIndex, rowIndex - 1);
+        }
+
+        // --- BOTÃO: DESCER LINHA ---
+        private void btnRowDown_Click(object sender, EventArgs e)
+        {
+            if (gridSequence.SelectedRows.Count == 0) return;
+
+            int rowIndex = gridSequence.SelectedRows[0].Index;
+
+            // Se já for a última linha, não tem pra onde descer, então aborta
+            if (rowIndex == gridSequence.Rows.Count - 1) return;
+
+            MoveRow(rowIndex, rowIndex + 1);
+        }
+
+        // --- FUNÇÃO AUXILIAR: MOVE A LINHA ---
+        private void MoveRow(int oldIndex, int newIndex)
+        {
+            // Pega a linha original
+            DataGridViewRow rowToMove = gridSequence.Rows[oldIndex];
+
+            // Remove da posição antiga
+            gridSequence.Rows.RemoveAt(oldIndex);
+
+            // Insere na posição nova
+            gridSequence.Rows.Insert(newIndex, rowToMove);
+
+            // Limpa qualquer seleção antiga e seleciona a linha no novo local dela
+            gridSequence.ClearSelection();
+            gridSequence.Rows[newIndex].Selected = true;
         }
     }
 }
