@@ -199,7 +199,9 @@
             gridSequence.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             gridSequence.Size = new Size(1042, 394);
             gridSequence.TabIndex = 0;
+            gridSequence.CellValidating += gridSequence_CellValidating;
             gridSequence.CellValueChanged += gridSequence_CellValueChanged;
+            gridSequence.EditingControlShowing += gridSequence_EditingControlShowing;
             // 
             // colAction
             // 

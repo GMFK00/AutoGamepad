@@ -365,5 +365,82 @@ namespace AutoGamepad
                 }
             }
         }
+
+        // --- PREPARA A CÉLULA PARA EDIÇÃO ---
+        private void gridSequence_EditingControlShowing(object sender, DataGridViewEditingControlShowingEventArgs e)
+        {
+
+            if (gridSequence.CurrentCell == null) return; // Evita aviso CS8602
+
+            // Pega o "TextBox" temporário que a tabela cria quando o usuário vai editar
+            if (e.Control is TextBox tb)
+            {
+                // Limpa eventos antigos para não duplicar se o usuário clicar várias vezes na mesma célula
+                tb.KeyPress -= TextBox_KeyPress;
+
+                // Verifica se a coluna atual é uma das colunas que queremos restringir (Só números)
+                int colIndex = gridSequence.CurrentCell.ColumnIndex;
+                string colName = gridSequence.Columns[colIndex].Name;
+
+                if (colName == "colValue" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+                {
+                    // Se for, monitora o teclado
+                    tb.KeyPress += TextBox_KeyPress;
+                }
+            }
+        }
+
+        // --- BLOQUEIA LETRAS ---
+        private void TextBox_KeyPress(object? sender, KeyPressEventArgs e)
+        {
+            // Se a tecla pressionada não for um Número (0-9) e também não for o "Backspace" (Apagar)
+            if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
+            {
+                // Descarta a tecla (Ela nunca chega a aparecer na tela)
+                e.Handled = true;
+            }
+        }
+
+        // --- PENTE-FINO (BLOQUEIA CTRL+V DE LETRAS E VALIDA LIMITES) ---
+        private void gridSequence_CellValidating(object sender, DataGridViewCellValidatingEventArgs e)
+        {
+            string colName = gridSequence.Columns[e.ColumnIndex].Name;
+
+            if (colName == "colValue" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+            {
+                // Pega o valor com segurança contra nulos
+                string newText = e.FormattedValue?.ToString() ?? "";
+
+                if (newText == "-" || newText == "") return;
+
+                // Tenta converter para número
+                if (!int.TryParse(newText, out int numericValue))
+                {
+                    e.Cancel = true;
+                    MessageBox.Show("Esta coluna aceita apenas números inteiros.", "Valor Inválido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return; // Para a validação aqui se não for número
+                }
+
+                // REGRA 1: Coluna de Força do Eixo (0 a 100%)
+                if (colName == "colValue")
+                {
+                    if (numericValue < 0 || numericValue > 100)
+                    {
+                        e.Cancel = true;
+                        MessageBox.Show("O valor do Eixo/Gatilho deve estar entre 0 e 100%.", "Limite Excedido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+
+                // REGRA 2: Colunas de Tempo e Jitter (Não podem ser negativos)
+                else if (colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+                {
+                    if (numericValue < 0)
+                    {
+                        e.Cancel = true;
+                        MessageBox.Show("O tempo não pode ser um valor negativo.", "Limite Excedido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+            }
+        }
     }
 }
