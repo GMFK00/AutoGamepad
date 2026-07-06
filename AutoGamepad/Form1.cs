@@ -6,6 +6,7 @@ using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using System.Runtime.InteropServices;
+using System.Media;
 
 namespace AutoGamepad
 {
@@ -99,6 +100,8 @@ namespace AutoGamepad
 
             try
             {
+                PlaySound(true); // TOCA O SOM DE INÍCIO AQUI!
+
                 // Inicia o motor principal
                 await RunAutomationAsync(_cancellationTokenSource.Token);
             }
@@ -112,6 +115,8 @@ namespace AutoGamepad
             }
             finally
             {
+                PlaySound(false); // TOCA O SOM DE FIM AQUI! (Toca mesmo se der erro ou cancelar)
+
                 // Limpa apenas a UI
                 ToggleUI(true);
                 Log("Ciclo de automação finalizado.");
@@ -229,6 +234,26 @@ namespace AutoGamepad
         {
             rtbLog.AppendText(message + Environment.NewLine);
             rtbLog.ScrollToCaret();
+        }
+
+        // Toca um som suave pelo alto-falante do Windows
+        private void PlaySound(bool isStarting)
+        {
+            if (!chkSound.Checked) return;
+
+            Task.Run(() =>
+            {
+                if (isStarting)
+                {
+                    // Som clássico de "Asterisco" (Informação) do Windows
+                    SystemSounds.Asterisk.Play();
+                }
+                else
+                {
+                    // Som clássico de "Exclamação" (Aviso) do Windows
+                    SystemSounds.Exclamation.Play();
+                }
+            });
         }
 
         // Evento que ocorre quando o usuário clica no "X" para fechar a janela

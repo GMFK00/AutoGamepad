@@ -45,6 +45,7 @@
             label5 = new Label();
             label6 = new Label();
             chkConnect = new CheckBox();
+            chkSound = new CheckBox();
             ((System.ComponentModel.ISupportInitialize)numHoldMin).BeginInit();
             ((System.ComponentModel.ISupportInitialize)numHoldMax).BeginInit();
             ((System.ComponentModel.ISupportInitialize)numWaitMin).BeginInit();
@@ -86,7 +87,7 @@
             // 
             // numHoldMin
             // 
-            numHoldMin.Location = new Point(116, 59);
+            numHoldMin.Location = new Point(116, 89);
             numHoldMin.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
             numHoldMin.Name = "numHoldMin";
             numHoldMin.Size = new Size(150, 27);
@@ -95,7 +96,7 @@
             // 
             // numHoldMax
             // 
-            numHoldMax.Location = new Point(116, 92);
+            numHoldMax.Location = new Point(116, 122);
             numHoldMax.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
             numHoldMax.Name = "numHoldMax";
             numHoldMax.Size = new Size(150, 27);
@@ -104,7 +105,7 @@
             // 
             // numWaitMin
             // 
-            numWaitMin.Location = new Point(116, 125);
+            numWaitMin.Location = new Point(116, 155);
             numWaitMin.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
             numWaitMin.Name = "numWaitMin";
             numWaitMin.Size = new Size(150, 27);
@@ -113,7 +114,7 @@
             // 
             // numWaitMax
             // 
-            numWaitMax.Location = new Point(116, 158);
+            numWaitMax.Location = new Point(116, 188);
             numWaitMax.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
             numWaitMax.Name = "numWaitMax";
             numWaitMax.Size = new Size(150, 27);
@@ -123,7 +124,7 @@
             // label1
             // 
             label1.AutoSize = true;
-            label1.Location = new Point(12, 61);
+            label1.Location = new Point(12, 91);
             label1.Name = "label1";
             label1.Size = new Size(74, 20);
             label1.TabIndex = 8;
@@ -132,7 +133,7 @@
             // label2
             // 
             label2.AutoSize = true;
-            label2.Location = new Point(12, 94);
+            label2.Location = new Point(12, 124);
             label2.Name = "label2";
             label2.Size = new Size(77, 20);
             label2.TabIndex = 9;
@@ -141,7 +142,7 @@
             // label3
             // 
             label3.AutoSize = true;
-            label3.Location = new Point(12, 127);
+            label3.Location = new Point(12, 157);
             label3.Name = "label3";
             label3.Size = new Size(71, 20);
             label3.TabIndex = 10;
@@ -150,7 +151,7 @@
             // label4
             // 
             label4.AutoSize = true;
-            label4.Location = new Point(12, 160);
+            label4.Location = new Point(12, 190);
             label4.Name = "label4";
             label4.Size = new Size(74, 20);
             label4.TabIndex = 11;
@@ -160,7 +161,7 @@
             // 
             rtbLog.BackColor = SystemColors.ControlDark;
             rtbLog.Dock = DockStyle.Bottom;
-            rtbLog.Location = new Point(0, 191);
+            rtbLog.Location = new Point(0, 244);
             rtbLog.Name = "rtbLog";
             rtbLog.ReadOnly = true;
             rtbLog.Size = new Size(682, 150);
@@ -169,7 +170,7 @@
             // 
             // numInitialDelay
             // 
-            numInitialDelay.Location = new Point(394, 59);
+            numInitialDelay.Location = new Point(394, 89);
             numInitialDelay.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
             numInitialDelay.Name = "numInitialDelay";
             numInitialDelay.Size = new Size(150, 27);
@@ -178,7 +179,7 @@
             // 
             // numMaxCycles
             // 
-            numMaxCycles.Location = new Point(394, 92);
+            numMaxCycles.Location = new Point(394, 122);
             numMaxCycles.Maximum = new decimal(new int[] { 999999, 0, 0, 0 });
             numMaxCycles.Name = "numMaxCycles";
             numMaxCycles.Size = new Size(150, 27);
@@ -187,7 +188,7 @@
             // label5
             // 
             label5.AutoSize = true;
-            label5.Location = new Point(321, 61);
+            label5.Location = new Point(321, 91);
             label5.Name = "label5";
             label5.Size = new Size(50, 20);
             label5.TabIndex = 15;
@@ -196,7 +197,7 @@
             // label6
             // 
             label6.AutoSize = true;
-            label6.Location = new Point(321, 94);
+            label6.Location = new Point(321, 124);
             label6.Name = "label6";
             label6.Size = new Size(53, 20);
             label6.TabIndex = 16;
@@ -215,11 +216,24 @@
             chkConnect.UseVisualStyleBackColor = true;
             chkConnect.CheckedChanged += chkConnect_CheckedChanged;
             // 
+            // chkSound
+            // 
+            chkSound.AutoSize = true;
+            chkSound.Checked = true;
+            chkSound.CheckState = CheckState.Checked;
+            chkSound.Location = new Point(12, 47);
+            chkSound.Name = "chkSound";
+            chkSound.Size = new Size(129, 24);
+            chkSound.TabIndex = 18;
+            chkSound.Text = "🔊 Emitir Som";
+            chkSound.UseVisualStyleBackColor = true;
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(682, 341);
+            ClientSize = new Size(682, 394);
+            Controls.Add(chkSound);
             Controls.Add(chkConnect);
             Controls.Add(label6);
             Controls.Add(label5);
@@ -268,5 +282,6 @@
         private Label label5;
         private Label label6;
         private CheckBox chkConnect;
+        private CheckBox chkSound;
     }
 }
