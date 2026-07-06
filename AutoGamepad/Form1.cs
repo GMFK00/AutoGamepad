@@ -27,6 +27,7 @@ namespace AutoGamepad
         private IXbox360Controller? _controller;
         private CancellationTokenSource? _cancellationTokenSource;
         private Random _rnd = new Random();
+        private bool _sequenceNeedsValidation = true;
 
         // --- HOTKEYS GLOBAIS DO WINDOWS ---
         [DllImport("user32.dll")]
@@ -83,6 +84,17 @@ namespace AutoGamepad
         // --- BOTÃO INICIAR ---
         private async void btnStart_Click(object sender, EventArgs e)
         {
+
+            if (_sequenceNeedsValidation)
+            {
+                if (!ValidateSequence())
+                {
+                    MessageBox.Show("Existem erros de lógica na sua sequência! Verifique as linhas marcadas em vermelho.", "Sequência Inválida", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    return;
+                }
+                // Se passou sem erros, marca como validada. Não precisa checar de novo até alguém mexer.
+                _sequenceNeedsValidation = false;
+            }
 
             // Trava de Segurança: Obriga a conectar antes de dar Start
             if (!chkConnect.Checked || _controller == null)
@@ -314,6 +326,8 @@ namespace AutoGamepad
 
             // Força a tabela a checar a regra do valor da célula assim que a linha nasce
             gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
+            
+            _sequenceNeedsValidation = true;
         }
 
         // --- BOTÃO: REMOVER LINHA ---
@@ -331,6 +345,7 @@ namespace AutoGamepad
                 // Se a pessoa só clicou numa célula e não na linha inteira, avisa ela
                 MessageBox.Show("Selecione uma linha inteira (clicando na margem esquerda da tabela) para remover.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
+            _sequenceNeedsValidation = true;
         }
 
         // --- DETECTA MUDANÇAS DENTRO DA TABELA ---
@@ -372,6 +387,7 @@ namespace AutoGamepad
                     jitterCell.Value = "-";
                 }
             }
+            _sequenceNeedsValidation = true;
         }
 
         // --- PREPARA A CÉLULA PARA EDIÇÃO ---
@@ -493,6 +509,90 @@ namespace AutoGamepad
             // Limpa qualquer seleção antiga e seleciona a linha no novo local dela
             gridSequence.ClearSelection();
             gridSequence.Rows[newIndex].Selected = true;
+
+            _sequenceNeedsValidation = true;
+        }
+
+        // --- VALIDADOR LÓGICO DE SEQUÊNCIA ---
+        private bool ValidateSequence()
+        {
+            bool isValid = true;
+
+            // Lista do C# para salvar quais botões estão segurados na linha do tempo
+            var heldButtons = new System.Collections.Generic.HashSet<string>();
+
+            // Limpa as cores vermelhas antigas da tabela antes de checar de novo
+            foreach (DataGridViewRow row in gridSequence.Rows)
+            {
+                row.DefaultCellStyle.BackColor = System.Drawing.Color.White;
+                row.ErrorText = ""; // Remove o ícone de erro
+            }
+
+            // Lê linha por linha do começo ao fim
+            for (int i = 0; i < gridSequence.Rows.Count; i++)
+            {
+                var row = gridSequence.Rows[i];
+                if (row.Cells["colAction"].Value == null) continue;
+
+                string action = row.Cells["colAction"].Value?.ToString() ?? "";
+                string button = row.Cells["colButton"].Value?.ToString() ?? "";
+
+                // Checagem de lógica: Soltar um botão que não está pressionado
+                if (action == "Soltar Botão/Eixo (Release)")
+                {
+                    if (!heldButtons.Contains(button))
+                    {
+                        MarkRowAsError(row, $"Tentando soltar '{button}', mas ele não foi mantido pressionado anteriormente!");
+                        isValid = false;
+                    }
+                    else
+                    {
+                        heldButtons.Remove(button); // Soltou, tira da lista
+                    }
+                }
+
+                // Checagem de lógica: Segurar um botão
+                else if (action == "Manter Pressionado (Hold)")
+                {
+                    if (heldButtons.Contains(button))
+                    {
+                        MarkRowAsError(row, $"O botão '{button}' já está sendo segurado!");
+                        isValid = false;
+                    }
+                    else
+                    {
+                        heldButtons.Add(button); // Segurou, coloca na lista
+                    }
+                }
+
+                // Checagem Matemática: Mínimo maior que Máximo
+                int minTime = int.Parse(row.Cells["colMinTime"].Value?.ToString() ?? "0");
+                int maxTime = int.Parse(row.Cells["colMaxTime"].Value?.ToString() ?? "0");
+                if (minTime > maxTime)
+                {
+                    MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
+                    isValid = false;
+                }
+            }
+
+            // Checagem Final: Esqueceu de soltar algum botão?
+            if (heldButtons.Count > 0)
+            {
+                // Se sobrou botão segurado, marca a ÚLTIMA linha como errada para avisar o usuário
+                var lastRow = gridSequence.Rows[gridSequence.Rows.Count - 1];
+                string botoesPresos = string.Join(", ", heldButtons);
+                MarkRowAsError(lastRow, $"A sequência terminou, mas você esqueceu de soltar: {botoesPresos}!");
+                isValid = false;
+            }
+
+            return isValid;
+        }
+
+        // Pinta a linha de vermelho e coloca um ponto de exclamação
+        private void MarkRowAsError(DataGridViewRow row, string message)
+        {
+            row.DefaultCellStyle.BackColor = System.Drawing.Color.LightCoral;
+            row.ErrorText = message;
         }
     }
 }
