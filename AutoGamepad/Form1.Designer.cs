@@ -35,7 +35,10 @@
             chkSound = new CheckBox();
             tabEditor = new TabControl();
             tabPage1 = new TabPage();
-            tabPage2 = new TabPage();
+            btnRowDown = new Button();
+            btnRowUp = new Button();
+            btnRowRemove = new Button();
+            btnRowAdd = new Button();
             gridSequence = new DataGridView();
             colAction = new DataGridViewComboBoxColumn();
             colButton = new DataGridViewComboBoxColumn();
@@ -43,20 +46,17 @@
             colMinTime = new DataGridViewTextBoxColumn();
             colMaxTime = new DataGridViewTextBoxColumn();
             colJitter = new DataGridViewTextBoxColumn();
-            btnRowAdd = new Button();
-            btnRowRemove = new Button();
-            btnRowUp = new Button();
-            btnRowDown = new Button();
-            txtJsonCode = new RichTextBox();
-            btnJsonCopy = new Button();
-            btnJsonPaste = new Button();
+            tabPage2 = new TabPage();
             btnJsonValidate = new Button();
+            btnJsonPaste = new Button();
+            btnJsonCopy = new Button();
+            txtJsonCode = new RichTextBox();
             button1 = new Button();
             button2 = new Button();
             tabEditor.SuspendLayout();
             tabPage1.SuspendLayout();
-            tabPage2.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)gridSequence).BeginInit();
+            tabPage2.SuspendLayout();
             SuspendLayout();
             // 
             // btnStart
@@ -141,6 +141,104 @@
             tabPage1.Text = "Visual (Tabela)";
             tabPage1.UseVisualStyleBackColor = true;
             // 
+            // btnRowDown
+            // 
+            btnRowDown.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRowDown.Location = new Point(1051, 151);
+            btnRowDown.Name = "btnRowDown";
+            btnRowDown.Size = new Size(119, 43);
+            btnRowDown.TabIndex = 4;
+            btnRowDown.Text = "⬇️ Descer";
+            btnRowDown.UseVisualStyleBackColor = true;
+            // 
+            // btnRowUp
+            // 
+            btnRowUp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRowUp.Location = new Point(1051, 104);
+            btnRowUp.Name = "btnRowUp";
+            btnRowUp.Size = new Size(119, 43);
+            btnRowUp.TabIndex = 3;
+            btnRowUp.Text = "⬆️ Subir";
+            btnRowUp.UseVisualStyleBackColor = true;
+            // 
+            // btnRowRemove
+            // 
+            btnRowRemove.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRowRemove.Location = new Point(1051, 55);
+            btnRowRemove.Name = "btnRowRemove";
+            btnRowRemove.Size = new Size(119, 43);
+            btnRowRemove.TabIndex = 2;
+            btnRowRemove.Text = "🗑️ Remover";
+            btnRowRemove.UseVisualStyleBackColor = true;
+            btnRowRemove.Click += btnRowRemove_Click;
+            // 
+            // btnRowAdd
+            // 
+            btnRowAdd.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRowAdd.Location = new Point(1051, 6);
+            btnRowAdd.Name = "btnRowAdd";
+            btnRowAdd.Size = new Size(119, 43);
+            btnRowAdd.TabIndex = 1;
+            btnRowAdd.Text = "➕ Adicionar";
+            btnRowAdd.UseVisualStyleBackColor = true;
+            btnRowAdd.Click += btnRowAdd_Click;
+            // 
+            // gridSequence
+            // 
+            gridSequence.AllowUserToAddRows = false;
+            gridSequence.AllowUserToDeleteRows = false;
+            gridSequence.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            gridSequence.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
+            gridSequence.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
+            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colValue, colMinTime, colMaxTime, colJitter });
+            gridSequence.Location = new Point(3, 6);
+            gridSequence.MinimumSize = new Size(0, 188);
+            gridSequence.MultiSelect = false;
+            gridSequence.Name = "gridSequence";
+            gridSequence.RowHeadersWidth = 51;
+            gridSequence.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
+            gridSequence.Size = new Size(1042, 394);
+            gridSequence.TabIndex = 0;
+            gridSequence.CellValueChanged += gridSequence_CellValueChanged;
+            // 
+            // colAction
+            // 
+            colAction.FillWeight = 120F;
+            colAction.HeaderText = "Ação";
+            colAction.MinimumWidth = 6;
+            colAction.Name = "colAction";
+            // 
+            // colButton
+            // 
+            colButton.FillWeight = 150F;
+            colButton.HeaderText = "Botão/Eixo";
+            colButton.MinimumWidth = 6;
+            colButton.Name = "colButton";
+            // 
+            // colValue
+            // 
+            colValue.HeaderText = "Valor Eixo (0-100%)";
+            colValue.MinimumWidth = 6;
+            colValue.Name = "colValue";
+            // 
+            // colMinTime
+            // 
+            colMinTime.HeaderText = "Tempo Min (ms)";
+            colMinTime.MinimumWidth = 6;
+            colMinTime.Name = "colMinTime";
+            // 
+            // colMaxTime
+            // 
+            colMaxTime.HeaderText = "Tempo Max (ms)";
+            colMaxTime.MinimumWidth = 6;
+            colMaxTime.Name = "colMaxTime";
+            // 
+            // colJitter
+            // 
+            colJitter.HeaderText = "Tremor Eixo (Jitter)";
+            colJitter.MinimumWidth = 6;
+            colJitter.Name = "colJitter";
+            // 
             // tabPage2
             // 
             tabPage2.Controls.Add(btnJsonValidate);
@@ -155,99 +253,35 @@
             tabPage2.Text = "Código (JSON)";
             tabPage2.UseVisualStyleBackColor = true;
             // 
-            // gridSequence
+            // btnJsonValidate
             // 
-            gridSequence.AllowUserToAddRows = false;
-            gridSequence.AllowUserToDeleteRows = false;
-            gridSequence.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            gridSequence.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colValue, colMinTime, colMaxTime, colJitter });
-            gridSequence.Location = new Point(3, 6);
-            gridSequence.MinimumSize = new Size(0, 188);
-            gridSequence.MultiSelect = false;
-            gridSequence.Name = "gridSequence";
-            gridSequence.RowHeadersWidth = 51;
-            gridSequence.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            gridSequence.Size = new Size(1042, 394);
-            gridSequence.TabIndex = 0;
+            btnJsonValidate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnJsonValidate.Location = new Point(1053, 104);
+            btnJsonValidate.Name = "btnJsonValidate";
+            btnJsonValidate.Size = new Size(119, 43);
+            btnJsonValidate.TabIndex = 3;
+            btnJsonValidate.Text = "✅ Checar";
+            btnJsonValidate.UseVisualStyleBackColor = true;
             // 
-            // colAction
+            // btnJsonPaste
             // 
-            colAction.HeaderText = "Ação";
-            colAction.MinimumWidth = 6;
-            colAction.Name = "colAction";
-            colAction.Width = 125;
+            btnJsonPaste.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnJsonPaste.Location = new Point(1053, 55);
+            btnJsonPaste.Name = "btnJsonPaste";
+            btnJsonPaste.Size = new Size(119, 43);
+            btnJsonPaste.TabIndex = 2;
+            btnJsonPaste.Text = "📝 Colar";
+            btnJsonPaste.UseVisualStyleBackColor = true;
             // 
-            // colButton
+            // btnJsonCopy
             // 
-            colButton.HeaderText = "Botão/Eixo";
-            colButton.MinimumWidth = 6;
-            colButton.Name = "colButton";
-            colButton.Width = 125;
-            // 
-            // colValue
-            // 
-            colValue.HeaderText = "Valor Eixo (0-255)";
-            colValue.MinimumWidth = 6;
-            colValue.Name = "colValue";
-            colValue.Width = 125;
-            // 
-            // colMinTime
-            // 
-            colMinTime.HeaderText = "Tempo Min (ms)";
-            colMinTime.MinimumWidth = 6;
-            colMinTime.Name = "colMinTime";
-            colMinTime.Width = 125;
-            // 
-            // colMaxTime
-            // 
-            colMaxTime.HeaderText = "Tempo Max (ms)";
-            colMaxTime.MinimumWidth = 6;
-            colMaxTime.Name = "colMaxTime";
-            colMaxTime.Width = 125;
-            // 
-            // colJitter
-            // 
-            colJitter.HeaderText = "Tremor Eixo (Jitter)";
-            colJitter.MinimumWidth = 6;
-            colJitter.Name = "colJitter";
-            colJitter.Width = 125;
-            // 
-            // btnRowAdd
-            // 
-            btnRowAdd.Location = new Point(1051, 6);
-            btnRowAdd.Name = "btnRowAdd";
-            btnRowAdd.Size = new Size(119, 43);
-            btnRowAdd.TabIndex = 1;
-            btnRowAdd.Text = "➕ Adicionar";
-            btnRowAdd.UseVisualStyleBackColor = true;
-            // 
-            // btnRowRemove
-            // 
-            btnRowRemove.Location = new Point(1051, 55);
-            btnRowRemove.Name = "btnRowRemove";
-            btnRowRemove.Size = new Size(119, 43);
-            btnRowRemove.TabIndex = 2;
-            btnRowRemove.Text = "🗑️ Remover";
-            btnRowRemove.UseVisualStyleBackColor = true;
-            // 
-            // btnRowUp
-            // 
-            btnRowUp.Location = new Point(1051, 104);
-            btnRowUp.Name = "btnRowUp";
-            btnRowUp.Size = new Size(119, 43);
-            btnRowUp.TabIndex = 3;
-            btnRowUp.Text = "⬆️ Subir";
-            btnRowUp.UseVisualStyleBackColor = true;
-            // 
-            // btnRowDown
-            // 
-            btnRowDown.Location = new Point(1051, 151);
-            btnRowDown.Name = "btnRowDown";
-            btnRowDown.Size = new Size(119, 43);
-            btnRowDown.TabIndex = 4;
-            btnRowDown.Text = "⬇️ Descer";
-            btnRowDown.UseVisualStyleBackColor = true;
+            btnJsonCopy.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnJsonCopy.Location = new Point(1053, 6);
+            btnJsonCopy.Name = "btnJsonCopy";
+            btnJsonCopy.Size = new Size(119, 43);
+            btnJsonCopy.TabIndex = 1;
+            btnJsonCopy.Text = "📋 Copiar";
+            btnJsonCopy.UseVisualStyleBackColor = true;
             // 
             // txtJsonCode
             // 
@@ -261,35 +295,9 @@
             txtJsonCode.TabIndex = 0;
             txtJsonCode.Text = "";
             // 
-            // btnJsonCopy
-            // 
-            btnJsonCopy.Location = new Point(1053, 6);
-            btnJsonCopy.Name = "btnJsonCopy";
-            btnJsonCopy.Size = new Size(119, 43);
-            btnJsonCopy.TabIndex = 1;
-            btnJsonCopy.Text = "📋 Copiar";
-            btnJsonCopy.UseVisualStyleBackColor = true;
-            // 
-            // btnJsonPaste
-            // 
-            btnJsonPaste.Location = new Point(1053, 55);
-            btnJsonPaste.Name = "btnJsonPaste";
-            btnJsonPaste.Size = new Size(119, 43);
-            btnJsonPaste.TabIndex = 2;
-            btnJsonPaste.Text = "📝 Colar";
-            btnJsonPaste.UseVisualStyleBackColor = true;
-            // 
-            // btnJsonValidate
-            // 
-            btnJsonValidate.Location = new Point(1053, 104);
-            btnJsonValidate.Name = "btnJsonValidate";
-            btnJsonValidate.Size = new Size(119, 43);
-            btnJsonValidate.TabIndex = 3;
-            btnJsonValidate.Text = "✅ Checar";
-            btnJsonValidate.UseVisualStyleBackColor = true;
-            // 
             // button1
             // 
+            button1.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             button1.Location = new Point(930, 5);
             button1.Name = "button1";
             button1.Size = new Size(119, 43);
@@ -299,6 +307,7 @@
             // 
             // button2
             // 
+            button2.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             button2.Location = new Point(1055, 5);
             button2.Name = "button2";
             button2.Size = new Size(119, 43);
@@ -323,8 +332,8 @@
             Text = "AutoGamepad";
             tabEditor.ResumeLayout(false);
             tabPage1.ResumeLayout(false);
-            tabPage2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)gridSequence).EndInit();
+            tabPage2.ResumeLayout(false);
             ResumeLayout(false);
             PerformLayout();
         }
@@ -340,12 +349,6 @@
         private TabPage tabPage1;
         private TabPage tabPage2;
         private DataGridView gridSequence;
-        private DataGridViewComboBoxColumn colAction;
-        private DataGridViewComboBoxColumn colButton;
-        private DataGridViewTextBoxColumn colValue;
-        private DataGridViewTextBoxColumn colMinTime;
-        private DataGridViewTextBoxColumn colMaxTime;
-        private DataGridViewTextBoxColumn colJitter;
         private Button btnRowDown;
         private Button btnRowUp;
         private Button btnRowRemove;
@@ -356,5 +359,11 @@
         private Button btnJsonCopy;
         private Button button1;
         private Button button2;
+        private DataGridViewComboBoxColumn colAction;
+        private DataGridViewComboBoxColumn colButton;
+        private DataGridViewTextBoxColumn colValue;
+        private DataGridViewTextBoxColumn colMinTime;
+        private DataGridViewTextBoxColumn colMaxTime;
+        private DataGridViewTextBoxColumn colJitter;
     }
 }

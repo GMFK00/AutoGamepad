@@ -1,15 +1,25 @@
-using System;
-using System.Threading;
-using System.Threading.Tasks;
-using System.Windows.Forms;
 using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
-using System.Runtime.InteropServices;
+using System;
 using System.Media;
+using System.Reflection.Emit;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace AutoGamepad
 {
+    // Define os tipos de ação possíveis na linha do tempo
+    public enum ActionType
+    {
+        PressAndRelease, // Aperta e solta no final do tempo (Tap)
+        Hold,            // Abaixa o botão/eixo (Rampa se for gatilho)
+        Release,         // Solta o botão/eixo (Rampa de volta se for gatilho)
+        Wait             // Apenas pausa a execução (Não afeta botões)
+    }
+
     public partial class Form1 : Form
     {
         // Variáveis globais do controle e do cancelamento
@@ -43,6 +53,9 @@ namespace AutoGamepad
             RegisterHotKey(this.Handle, HOTKEY_ID_STOP, MOD_CONTROL | MOD_SHIFT, VK_F10);
 
             Log("Atalhos globais ativados: [Ctrl+Shift+F9] Iniciar | [Ctrl+Shift+F10] Parar");
+
+            // Configura a tabela
+            SetupGridColumns();
         }
 
         // --- INTERCEPTADOR DO TECLADO ---
@@ -230,6 +243,126 @@ namespace AutoGamepad
                 DisconnectController();
                 chkConnect.Text = "🔌 Conectar Controle Virtual";
                 Log("[INFO] Controle desconectado com segurança.");
+            }
+        }
+
+        // Configura as opções que aparecem dentro das caixinhas da Tabela
+        private void SetupGridColumns()
+        {
+            // 1. Pega a coluna "Ação"
+            var actionColumn = (DataGridViewComboBoxColumn)gridSequence.Columns["colAction"]!;
+            actionColumn.Items.Clear();
+            actionColumn.Items.Add("Pressionar e Soltar (Tap)");
+            actionColumn.Items.Add("Manter Pressionado (Hold)");
+            actionColumn.Items.Add("Soltar Botão/Eixo (Release)");
+            actionColumn.Items.Add("Pausa (Wait)");
+
+            // 2. Pega a coluna "Botão/Eixo" 
+            var buttonColumn = (DataGridViewComboBoxColumn)gridSequence.Columns["colButton"]!;
+            buttonColumn.Items.Clear();
+            buttonColumn.Items.Add("[Vazio / Apenas Pausa]");
+
+            // Botões Digitais
+            buttonColumn.Items.Add("Botão A");
+            buttonColumn.Items.Add("Botão B");
+            buttonColumn.Items.Add("Botão X");
+            buttonColumn.Items.Add("Botão Y");
+            buttonColumn.Items.Add("D-Pad Cima");
+            buttonColumn.Items.Add("D-Pad Baixo");
+            buttonColumn.Items.Add("D-Pad Esquerda");
+            buttonColumn.Items.Add("D-Pad Direita");
+            buttonColumn.Items.Add("Ombro Esquerdo (LB)");
+            buttonColumn.Items.Add("Ombro Direito (RB)");
+            buttonColumn.Items.Add("Clique Analógico Esq (L3)");
+            buttonColumn.Items.Add("Clique Analógico Dir (R3)");
+
+            // Gatilhos Analógicos (0 a 100%)
+            buttonColumn.Items.Add("Gatilho Esquerdo (LT)");
+            buttonColumn.Items.Add("Gatilho Direito (RT)");
+
+            // Movimento Analógico Esquerdo (0 a 100%)
+            buttonColumn.Items.Add("Analógico Esq - Cima");
+            buttonColumn.Items.Add("Analógico Esq - Baixo");
+            buttonColumn.Items.Add("Analógico Esq - Esquerda");
+            buttonColumn.Items.Add("Analógico Esq - Direita");
+
+            // Movimento Analógico Direito (0 a 100%)
+            buttonColumn.Items.Add("Analógico Dir - Cima");
+            buttonColumn.Items.Add("Analógico Dir - Baixo");
+            buttonColumn.Items.Add("Analógico Dir - Esquerda");
+            buttonColumn.Items.Add("Analógico Dir - Direita");
+        }
+
+        // --- BOTÃO: ADICIONAR LINHA ---
+        private void btnRowAdd_Click(object sender, EventArgs e)
+        {
+            // Cria uma linha nova e guarda qual é o índice dela
+            int rowIndex = gridSequence.Rows.Add();
+
+            // Preenche as caixas de Ação e Botão com valores padrão pra não ficar vazio
+            gridSequence.Rows[rowIndex].Cells["colAction"].Value = "Pressionar e Soltar (Tap)";
+            gridSequence.Rows[rowIndex].Cells["colButton"].Value = "Botão A";
+
+            // Coloca valores padrão de tempo (100ms) e força (100%)
+            gridSequence.Rows[rowIndex].Cells["colValue"].Value = "100";
+            gridSequence.Rows[rowIndex].Cells["colMinTime"].Value = "100";
+            gridSequence.Rows[rowIndex].Cells["colMaxTime"].Value = "100";
+            gridSequence.Rows[rowIndex].Cells["colJitter"].Value = "0";
+
+            // Rola a tabela para baixo automaticamente para mostrar a nova linha
+            gridSequence.FirstDisplayedScrollingRowIndex = rowIndex;
+
+            // Força a tabela a checar a regra do valor da célula assim que a linha nasce
+            gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
+        }
+
+        // --- BOTÃO: REMOVER LINHA ---
+        private void btnRowRemove_Click(object sender, EventArgs e)
+        {
+            // Verifica se o usuário selecionou alguma linha
+            if (gridSequence.SelectedRows.Count > 0)
+            {
+                // Deleta a linha selecionada
+                int rowIndex = gridSequence.SelectedRows[0].Index;
+                gridSequence.Rows.RemoveAt(rowIndex);
+            }
+            else
+            {
+                // Se a pessoa só clicou numa célula e não na linha inteira, avisa ela
+                MessageBox.Show("Selecione uma linha inteira (clicando na margem esquerda da tabela) para remover.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        // --- DETECTA MUDANÇAS DENTRO DA TABELA ---
+        private void gridSequence_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            // Ignora se o usuário clicou no cabeçalho (linha -1)
+            if (e.RowIndex < 0) return;
+
+            // Se a coluna que o usuário acabou de alterar for a coluna "Botão/Eixo" (colButton)
+            if (gridSequence.Columns[e.ColumnIndex].Name == "colButton")
+            {
+                // Pega o texto do botão escolhido
+                var selectedButton = gridSequence.Rows[e.RowIndex].Cells["colButton"].Value?.ToString();
+
+                // Pega a célula do "Valor Eixo" da mesma linha, para travar ou destravar
+                var valueCell = gridSequence.Rows[e.RowIndex].Cells["colValue"];
+
+                // Checa se a palavra contém "Gatilho" ou "Analógico"
+                if (selectedButton != null && (selectedButton.Contains("Gatilho") || selectedButton.Contains("Analógico")))
+                {
+                    // É um eixo. Libera para o usuário digitar.
+                    valueCell.ReadOnly = false;
+                    valueCell.Style.BackColor = System.Drawing.Color.White; // Fica branco normal
+                    if (valueCell.Value?.ToString() == "-") valueCell.Value = "100"; // Põe 100 por padrão
+                }
+                else
+                {
+                    // É um botão normal ou pausa. Bloqueia a edição.
+                    valueCell.ReadOnly = true;
+                    valueCell.Style.BackColor = System.Drawing.Color.LightGray; // Pinta de cinza
+                    valueCell.Value = "-"; // Coloca um tracinho pra mostrar que não é utilizável
+                }
             }
         }
     }
