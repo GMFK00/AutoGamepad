@@ -53,10 +53,13 @@
             txtJsonCode = new RichTextBox();
             button1 = new Button();
             button2 = new Button();
+            chkLimitCycles = new CheckBox();
+            numMaxCycles = new NumericUpDown();
             tabEditor.SuspendLayout();
             tabPage1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)gridSequence).BeginInit();
             tabPage2.SuspendLayout();
+            ((System.ComponentModel.ISupportInitialize)numMaxCycles).BeginInit();
             SuspendLayout();
             // 
             // btnStart
@@ -110,9 +113,9 @@
             chkSound.CheckState = CheckState.Checked;
             chkSound.Location = new Point(471, 15);
             chkSound.Name = "chkSound";
-            chkSound.Size = new Size(129, 24);
+            chkSound.Size = new Size(132, 24);
             chkSound.TabIndex = 18;
-            chkSound.Text = "🔊 Emitir Som";
+            chkSound.Text = "🔊 Emitir Som:";
             chkSound.UseVisualStyleBackColor = true;
             // 
             // tabEditor
@@ -319,11 +322,35 @@
             button2.Text = "📂 Carregar";
             button2.UseVisualStyleBackColor = true;
             // 
+            // chkLimitCycles
+            // 
+            chkLimitCycles.AutoSize = true;
+            chkLimitCycles.Location = new Point(639, 15);
+            chkLimitCycles.Name = "chkLimitCycles";
+            chkLimitCycles.Size = new Size(123, 24);
+            chkLimitCycles.TabIndex = 22;
+            chkLimitCycles.Text = "Limitar Ciclos:";
+            chkLimitCycles.UseVisualStyleBackColor = true;
+            chkLimitCycles.CheckedChanged += chkLimitCycles_CheckedChanged;
+            // 
+            // numMaxCycles
+            // 
+            numMaxCycles.Enabled = false;
+            numMaxCycles.Location = new Point(768, 14);
+            numMaxCycles.Maximum = new decimal(new int[] { 99999, 0, 0, 0 });
+            numMaxCycles.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+            numMaxCycles.Name = "numMaxCycles";
+            numMaxCycles.Size = new Size(150, 27);
+            numMaxCycles.TabIndex = 23;
+            numMaxCycles.Value = new decimal(new int[] { 1, 0, 0, 0 });
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1186, 649);
+            Controls.Add(numMaxCycles);
+            Controls.Add(chkLimitCycles);
             Controls.Add(button2);
             Controls.Add(button1);
             Controls.Add(tabEditor);
@@ -338,6 +365,7 @@
             tabPage1.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)gridSequence).EndInit();
             tabPage2.ResumeLayout(false);
+            ((System.ComponentModel.ISupportInitialize)numMaxCycles).EndInit();
             ResumeLayout(false);
             PerformLayout();
         }
@@ -369,5 +397,7 @@
         private DataGridViewTextBoxColumn colMinTime;
         private DataGridViewTextBoxColumn colMaxTime;
         private DataGridViewTextBoxColumn colJitter;
+        private CheckBox chkLimitCycles;
+        private NumericUpDown numMaxCycles;
     }
 }

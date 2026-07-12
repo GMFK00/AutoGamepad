@@ -145,32 +145,205 @@ namespace AutoGamepad
             _cancellationTokenSource?.Cancel(); // Avisa o loop para abortar
         }
 
-        // --- A AUTOMAÇÃO ---
+        // --- AUTOMAÇÃO ---
         private async Task RunAutomationAsync(CancellationToken token)
         {
-            Log("O novo motor de sequências está em construção...");
-            await Task.Delay(2000, token);
+            // Coloca o controle em "Ponto Morto" para garantir que nada ficou apertado da vez anterior
+            ResetControllerState();
+
+            // 1. Lê a configuração de Ciclos da tela
+            bool useLimit = chkLimitCycles.Checked;
+            int maxCycles = (int)numMaxCycles.Value;
+
+            Log("Iniciando execução da tabela de sequências...");
+
+            // Loop Infinito até o usuário apertar Parar ou atingir o limite de ciclos
+            int loopCount = 1;
+            while (!token.IsCancellationRequested)
+            {
+                // Verifica o limite de ciclos (Se for maior que o máximo, ele para e quebra o loop)
+                if (useLimit && loopCount > maxCycles)
+                {
+                    Log($"\n[INFO] Limite de {maxCycles} ciclos atingido. Finalizando com sucesso.");
+                    break;
+                }
+
+                Log($"\n=== Iniciando Ciclo {loopCount} ===");
+
+                // Varre a tabela linha por linha
+                for (int i = 0; i < gridSequence.Rows.Count; i++)
+                {
+                    // Se apertar Parar no meio da tabela, ele aborta na hora
+                    if (token.IsCancellationRequested) break;
+
+                    var row = gridSequence.Rows[i];
+                    if (row.Cells["colAction"].Value == null) continue; // Pula linha vazia
+
+                    // Lê os dados da coluna atual
+                    string action = row.Cells["colAction"].Value?.ToString() ?? "";
+                    string button = row.Cells["colButton"].Value?.ToString() ?? "";
+
+                    // Converte os textos para números com segurança (Ternário para evitar nulos)
+                    int valuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100;
+                    int minTime = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int min) ? min : 0;
+                    int maxTime = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int max) ? max : 0;
+
+                    // Sorteia o tempo (Jitter de Tempo)
+                    int waitTime = _rnd.Next(minTime, maxTime + 1);
+
+                    Log($"[Linha {i + 1}] {action} [{button}] -> Força: {valuePercent}% | Tempo: {waitTime}ms");
+
+                    // 1. Se for apenas PAUSA
+                    if (action == "Pausa (Wait)")
+                    {
+                        await Task.Delay(waitTime, token);
+                        continue; // Pula pro próximo passo da tabela
+                    }
+
+                    // 2. Envia o sinal de PRESSIONAR pro controle
+                    if (action == "Pressionar e Soltar (Tap)" || action == "Manter Pressionado (Hold)")
+                    {
+                        ProcessHardwareInput(button, valuePercent, true);
+                    }
+                    else if (action == "Soltar Botão/Eixo (Release)")
+                    {
+                        ProcessHardwareInput(button, 0, false);
+                    }
+
+                    // 3. Aguarda o tempo estipulado da ação
+                    await Task.Delay(waitTime, token);
+
+                    // 4. Se for TAP, precisa soltar o botão automaticamente logo após a pausa!
+                    if (action == "Pressionar e Soltar (Tap)")
+                    {
+                        ProcessHardwareInput(button, 0, false);
+                    }
+                }
+
+                loopCount++;
+            }
         }
 
         // --- FUNÇÕES AUXILIARES ---
 
-        // Transforma o texto do ComboBox em botão de Xbox
-        private Xbox360Button GetSelectedButton()
+        // --- TRADUTOR: CONVERTE TEXTO DA TABELA EM SINAL ---
+        private void ProcessHardwareInput(string buttonName, int valuePercent, bool isPress)
         {
-            return Xbox360Button.A;
+            if (_controller == null) return;
+
+            // Para botões digitais, o estado é True (Apertar) ou False (Soltar)
+            bool state = isPress;
+
+            switch (buttonName)
+            {
+                // BOTÕES DIGITAIS
+                case "Botão A": _controller.SetButtonState(Xbox360Button.A, state); break;
+                case "Botão B": _controller.SetButtonState(Xbox360Button.B, state); break;
+                case "Botão X": _controller.SetButtonState(Xbox360Button.X, state); break;
+                case "Botão Y": _controller.SetButtonState(Xbox360Button.Y, state); break;
+                case "D-Pad Cima": _controller.SetButtonState(Xbox360Button.Up, state); break;
+                case "D-Pad Baixo": _controller.SetButtonState(Xbox360Button.Down, state); break;
+                case "D-Pad Esquerda": _controller.SetButtonState(Xbox360Button.Left, state); break;
+                case "D-Pad Direita": _controller.SetButtonState(Xbox360Button.Right, state); break;
+                case "Ombro Esquerdo (LB)": _controller.SetButtonState(Xbox360Button.LeftShoulder, state); break;
+                case "Ombro Direito (RB)": _controller.SetButtonState(Xbox360Button.RightShoulder, state); break;
+                case "Clique Analógico Esq (L3)": _controller.SetButtonState(Xbox360Button.LeftThumb, state); break;
+                case "Clique Analógico Dir (R3)": _controller.SetButtonState(Xbox360Button.RightThumb, state); break;
+
+                // GATILHOS (Convertendo 0-100% para 0-255 Byte)
+                case "Gatilho Esquerdo (LT)":
+                    byte ltValue = isPress ? (byte)(valuePercent * 255 / 100) : (byte)0;
+                    _controller.SetSliderValue(Xbox360Slider.LeftTrigger, ltValue);
+                    break;
+                case "Gatilho Direito (RT)":
+                    byte rtValue = isPress ? (byte)(valuePercent * 255 / 100) : (byte)0;
+                    _controller.SetSliderValue(Xbox360Slider.RightTrigger, rtValue);
+                    break;
+
+                // ANALÓGICOS (Convertendo 0-100% para 0-32767 Short)
+                // Cima/Direita = Valores Positivos | Baixo/Esquerda = Valores Negativos
+                case "Analógico Esq - Cima":
+                    short lsUp = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.LeftThumbY, lsUp);
+                    break;
+                case "Analógico Esq - Baixo":
+                    short lsDown = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.LeftThumbY, lsDown);
+                    break;
+                case "Analógico Esq - Direita":
+                    short lsRight = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.LeftThumbX, lsRight);
+                    break;
+                case "Analógico Esq - Esquerda":
+                    short lsLeft = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.LeftThumbX, lsLeft);
+                    break;
+
+                // Mesmo para o Analógico Direito...
+                case "Analógico Dir - Cima":
+                    short rsUp = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.RightThumbY, rsUp);
+                    break;
+                case "Analógico Dir - Baixo":
+                    short rsDown = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.RightThumbY, rsDown);
+                    break;
+                case "Analógico Dir - Direita":
+                    short rsRight = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.RightThumbX, rsRight);
+                    break;
+                case "Analógico Dir - Esquerda":
+                    short rsLeft = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
+                    _controller.SetAxisValue(Xbox360Axis.RightThumbX, rsLeft);
+                    break;
+            }
         }
 
-        // Desconecta e limpa a memória (Importante!)
+        // --- ZERA O CONTROLE (PONTO MORTO) ---
+        // Solta todos os botões e zera os eixos sem precisar desconectar o USB
+        private void ResetControllerState()
+        {
+            if (_controller == null) return;
+
+            // Zera Botões Digitais
+            _controller.SetButtonState(Xbox360Button.A, false);
+            _controller.SetButtonState(Xbox360Button.B, false);
+            _controller.SetButtonState(Xbox360Button.X, false);
+            _controller.SetButtonState(Xbox360Button.Y, false);
+            _controller.SetButtonState(Xbox360Button.Up, false);
+            _controller.SetButtonState(Xbox360Button.Down, false);
+            _controller.SetButtonState(Xbox360Button.Left, false);
+            _controller.SetButtonState(Xbox360Button.Right, false);
+            _controller.SetButtonState(Xbox360Button.LeftShoulder, false);
+            _controller.SetButtonState(Xbox360Button.RightShoulder, false);
+            _controller.SetButtonState(Xbox360Button.LeftThumb, false);
+            _controller.SetButtonState(Xbox360Button.RightThumb, false);
+
+            // Zera Gatilhos (0)
+            _controller.SetSliderValue(Xbox360Slider.LeftTrigger, 0);
+            _controller.SetSliderValue(Xbox360Slider.RightTrigger, 0);
+
+            // Zera Analógicos (Centro = 0)
+            _controller.SetAxisValue(Xbox360Axis.LeftThumbX, 0);
+            _controller.SetAxisValue(Xbox360Axis.LeftThumbY, 0);
+            _controller.SetAxisValue(Xbox360Axis.RightThumbX, 0);
+            _controller.SetAxisValue(Xbox360Axis.RightThumbY, 0);
+        }
+
+        // --- DESCONECTA E LIMPA A MEMÓRIA ---
         private void DisconnectController()
         {
             if (_controller != null)
             {
-                _controller.Disconnect();
+                // Tenta desconectar. Se o Windows já tiver matado o objeto, ignora o erro silenciosamente.
+                try { _controller.Disconnect(); } catch { }
                 _controller = null;
             }
+
             if (_client != null)
             {
-                _client.Dispose();
+                // Tenta limpar o cliente principal
+                try { _client.Dispose(); } catch { }
                 _client = null;
             }
         }
@@ -185,13 +358,24 @@ namespace AutoGamepad
             // Travas da Tabela e do Editor JSON
             gridSequence.Enabled = isIdle;
             txtJsonCode.Enabled = isIdle;
+
+            // Travas de Ciclo e Som
+            chkLimitCycles.Enabled = isIdle;
+            chkSound.Enabled = isIdle;
+
+            // Só libera a caixinha de número se estiver em "Idle" E o Checkbox de limite estiver marcado!
+            numMaxCycles.Enabled = isIdle && chkLimitCycles.Checked;
         }
 
         // Escreve na caixa preta e rola pra baixo
         private void Log(string message)
         {
-            rtbLog.AppendText(message + Environment.NewLine);
-            rtbLog.ScrollToCaret();
+            // Checa se a caixa preta não foi destruída (IsDisposed) pelo Windows fechando a janela
+            if (rtbLog != null && !rtbLog.IsDisposed)
+            {
+                rtbLog.AppendText(message + Environment.NewLine);
+                rtbLog.ScrollToCaret();
+            }
         }
 
         // Toca um som suave pelo alto-falante do Windows
@@ -217,7 +401,14 @@ namespace AutoGamepad
         // Evento que ocorre quando o usuário clica no "X" para fechar a janela
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // 1. Manda o sinal de abortar pro Motor da automação parar IMEDIATAMENTE
             _cancellationTokenSource?.Cancel();
+
+            // 2. Coloca o controle em ponto morto e espera 50ms pro Motor finalizar
+            ResetControllerState();
+            Thread.Sleep(50);
+
+            // 3. Agora sim é seguro desconectar
             DisconnectController();
 
             // Devolve as teclas pro Windows ao fechar o programa
@@ -326,7 +517,7 @@ namespace AutoGamepad
 
             // Força a tabela a checar a regra do valor da célula assim que a linha nasce
             gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
-            
+
             _sequenceNeedsValidation = true;
         }
 
@@ -363,10 +554,15 @@ namespace AutoGamepad
                 var valueCell = gridSequence.Rows[e.RowIndex].Cells["colValue"];
                 var jitterCell = gridSequence.Rows[e.RowIndex].Cells["colJitter"];
 
-                // Checa se a palavra contém "Gatilho" ou "Analógico"
-                if (selectedButton != null && (selectedButton.Contains("Gatilho") || selectedButton.Contains("Analógico")))
+                // Checa com precisão se é um Gatilho ou Movimento de Analógico 
+                // (Ignora D-Pads e os Cliques L3/R3 que começam com outras palavras)
+                bool isAxis = selectedButton != null && (
+                              selectedButton.StartsWith("Gatilho") ||
+                              selectedButton.StartsWith("Analógico"));
+
+                if (isAxis)
                 {
-                    // É um eixo. Libera tudo.
+                    // É um eixo de movimento/gatilho. Libera tudo.
                     valueCell.ReadOnly = false;
                     valueCell.Style.BackColor = System.Drawing.Color.White;
                     if (valueCell.Value?.ToString() == "-") valueCell.Value = "100";
@@ -387,6 +583,8 @@ namespace AutoGamepad
                     jitterCell.Value = "-";
                 }
             }
+
+            // Sinaliza o Dirty Flag para o Validador
             _sequenceNeedsValidation = true;
         }
 
@@ -593,6 +791,12 @@ namespace AutoGamepad
         {
             row.DefaultCellStyle.BackColor = System.Drawing.Color.LightCoral;
             row.ErrorText = message;
+        }
+
+        // --- ATIVA/DESATIVA A CHECKBOX DE CICLOS ---
+        private void chkLimitCycles_CheckedChanged(object sender, EventArgs e)
+        {
+            numMaxCycles.Enabled = chkLimitCycles.Checked;
         }
     }
 }
