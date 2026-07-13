@@ -1,41 +1,41 @@
-# AutoGamepad
+# AutoGamepad 
 
-O **AutoGamepad** é um motor de automação a nível de hardware projetado para Windows. Utilizando a comunicação direta com o driver virtual ViGEmBus, ele permite a emulação de comandos de um controle Xbox 360 virtual, contornando a maioria dos métodos tradicionais de detecção de software de macro.
+O **AutoGamepad** é um motor de automação a nível de hardware projetado para sistemas Windows. Interagindo diretamente com o driver de kernel ViGEmBus, ele permite a emulação de comandos de um controle Xbox 360 virtual, contornando limitações de APIs de software convencionais (como SendInput ou DirectInput).
 
-Este projeto foi desenvolvido com foco na precisão de eixos (gatilhos e analógicos) e em mecanismos para prevenir a detecção comportamental por sistemas Anti-AFK.
+Este projeto tem como foco a alta precisão na manipulação de eixos (gatilhos e analógicos) e mecanismos de evasão comportamental (*Jitter* contínuo), voltados para ambientes restritivos.
 
-## Arquitetura e Funcionalidades
+## Arquitetura e Funcionalidades (v1.1.0)
 
-O AutoGamepad opera como um interpretador de sequência de estados, não apenas como um macro de reprodução linear. Suas principais características atuais incluem:
+O AutoGamepad opera como um interpretador de sequência baseada em Máquina de Estados, utilizando a programação assíncrona do C# para manter um "Game Loop" desacoplado da interface gráfica (UI).
 
-* **Engine de Interpolação a 60 Hz:** Suporte a ações complexas de eixos e gatilhos. Em vez de injetar estados instantâneos estáticos, o programa calcula transições (Rampas) baseadas na duração definida pelo usuário, gerando uma curva de transição natural (Lerp).
-* **Sistema de Jitter (Tremor Contínuo):** Funcionalidade específica para eixos. Um ruído aleatório em uma frequência pré-definida é sobreposto ao valor atual do gatilho ou analógico, impossibilitando a leitura de valores estáticos fixos nos logs dos servidores do jogo.
-* **Jitter Temporal:** Todo e qualquer atraso (Wait) ou tempo de pressionamento de botão possui margens mínimas e máximas de duração. O algoritmo resolve e varia ativamente o tempo a cada ciclo executado.
-* **Validador Lógico (State Machine):** A interface possui um sistema preventivo. A automação avalia toda a cadeia de eventos antes da injeção. Comandos contraditórios ou falhas na lógica de fechamento de botões são identificados e destacados em vermelho, prevenindo crashes no driver ou comportamentos físicos bizarros no jogo-alvo.
+* **Engine de Interpolação a 60 Hz:** Em vez de injeções estáticas de estado, o motor calcula transições de valores (*Rampas*) baseadas em tempo (Linear Interpolation). Isso permite a simulação orgânica da progressão de força em molas de gatilhos ou deslocamento de direcionais.
+* **Sistema de Jitter Físico:** Uma função específica para eixos. Um ruído caótico parametrizável é sobreposto ao valor atual do eixo em uma frequência configurável, mascarando padrões estáticos em logs de input de servidores.
+* **Jitter Temporal Contínuo:** Todo e qualquer atraso (*Wait*) ou duração de interação apresenta margens dinâmicas (Min/Max). O algoritmo resolve a flutuação do tempo a cada ciclo executado de maneira independente.
+* **Validador Semântico de Estado:** Prevenção de falhas. A interface analisa a cadeia de eventos de forma lógica antes da injeção no Kernel, bloqueando comandos paradoxais (ex: tentar executar um *Release* em um botão não submetido a *Hold* prévio).
+* **Gestão e Persistência de Perfis (JSON):** Suporte nativo a salvamento e carregamento de configurações de automação. Inclui um editor bidirecional incorporado com validação de esquema de dados.
 
-## Pré-Requisitos
+## Pré-Requisitos e Setup
 
-A execução e/ou compilação deste código exige a presença de bibliotecas externas instaladas no sistema hospedeiro.
+O funcionamento do software está vinculado à presença do driver de simulação instalado no sistema hospedeiro.
 
-* O sistema requer a instalação manual do driver de nível de Kernel para a emulação. Faça o download e instale o [ViGEmBus Driver](https://github.com/nefarius/ViGEmBus/releases).
-* A compilação é baseada no framework .NET 10 (Windows Forms).
+1. Baixe o instalador oficial do [ViGEmBus Driver](https://github.com/nefarius/ViGEmBus/releases).
+2. Execute a instalação do pacote. O barramento virtual requer privilégios de administrador para ser configurado no Kernel.
+3. Para compilar a fonte, o ambiente deve possuir o SDK do .NET 10 (Windows Forms App).
 
 ## Como Utilizar
 
-1. Conecte o controle virtual pela interface superior do aplicativo.
-2. Defina o número de ciclos máximos que a rotina deve ser executada antes de encerrar de forma autônoma.
-3. Se estiver trabalhando com curvas de eixos ou aceleração contínua, habilite o sistema "Tremor (Eixos)" e defina a frequência (Ex: 100ms para uma variação orgânica).
-4. Adicione as linhas na tabela determinando as sequências de comandos:
-   * **Pressionar e Soltar (Tap):** Injeta o sinal, pausa durante o período estipulado, e solta automaticamente.
-   * **Manter Pressionado (Hold):** Atinge a pressão determinada no eixo ou ativa o botão digital, passando para a próxima linha da lista imediatamente.
-   * **Soltar (Release):** Processa a rampa de volta para a posição neutra ou desativa o botão digital e passa adiante.
-5. Inicie a execução pelo botão principal ou pela Hotkey Global pré-definida (`Ctrl+Shift+F9`).
+1. **Conexão:** Inicie o software e alterne o estado para **"Conectar Controle Virtual"**. O sistema notificará a criação do periférico virtual.
+2. **Ciclos:** Defina o limite de execuções completas da rotina (Zero = Loop infinito).
+3. **Física (Opcional):** Se as rotinas englobarem uso de eixos contínuos, ative o sistema "Tremor (Eixos)" e configure a frequência de pulso em milissegundos.
+4. **Programação da Linha do Tempo:** Utilize a tabela visual para adicionar passos lógicos:
+   * `Pressionar e Soltar (Tap)`: Completa o ciclo de Rampa Ascendente, Platô e Rampa Descendente dentro da duração definida.
+   * `Manter Pressionado (Hold)`: Trava o estado do botão no valor alvo. Avança de linha imediatamente após concluir a rampa de subida.
+   * `Soltar (Release)`: Conclui a rampa de descida para a posição neutra e avança.
+   * `Pausa (Wait)`: Paralisa o motor no estado atual por um tempo aleatório determinado pelas colunas Min e Max.
+5. **Execução:** Dispare a automação via botões nativos ou mediante os ganchos locais de atalho do teclado (`Ctrl+Shift+F9` para iniciar e `Ctrl+Shift+F10` para interromper de forma abrupta).
 
-## TODO List (Lista de Pendências)
-- [ ] Implementação de estrutura nativa de serialização para exportação/importação das tabelas de estado no formato `.json`.
-- [ ] Renderização condicional por abas, separando o editor visual (Tabela) de um editor dinâmico por blocos de texto (JSON) bidirecional.
-- [ ] Aprimoramento e formatação visual do console de Logs em tempo de execução.
+## Licença e Ética de Uso
 
-## Licença
+Este projeto encontra-se licenciado sob a **GNU GPLv3**. Permite-se a utilização, modificação e distribuição integral do software de forma aberta. Obras derivadas que incorporem este código devem, obrigatoriamente, compartilhar seu código-fonte modificado sob os mesmos termos da presente licença.
 
-Este software é distribuído de forma aberta sob a licença **GPLv3**. Modificações ou distribuições em software de terceiros devem respeitar a integridade da licença livre definida no repositório original. O desenvolvedor isenta-se de qualquer responsabilidade ou punições legais acarretadas pelo uso prático das bibliotecas contidas neste software.
+*Disclaimer:* O AutoGamepad é uma ferramenta direcionada para testes QA (Quality Assurance), simulação de acessibilidade e estudo arquitetural de *Anti-AFK* local. A utilização do software em infraestruturas competitivas online pode ensejar sanções e quebra dos Termos de Serviço (TOS) das respectivas plataformas. O autor desobriga-se de qualquer responsabilidade gerada pela conduta ou emprego não-educacional deste motor de emulação.
