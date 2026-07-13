@@ -2,6 +2,9 @@ using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using System;
+using System.IO;
+using System.Text.Json;
+using System.Collections.Generic;
 using System.Media;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
@@ -27,9 +30,49 @@ namespace AutoGamepad
         private IXbox360Controller? _controller;
         private CancellationTokenSource? _cancellationTokenSource;
         private Random _rnd = new Random();
+        private bool _sequenceNeedsValidation = true;
+
+        // --- DICIONÁRIOS DE TRADUÇÃO (VISUAL <-> JSON) ---
+
         // Memória do motor físico (Guarda a força atual de cada eixo 0-100%)
         private System.Collections.Generic.Dictionary<string, float> _axisStates = new();
-        private bool _sequenceNeedsValidation = true;
+
+        // Traduz Ações (Tabela -> JSON)
+        private readonly Dictionary<string, string> _actionToJson = new()
+        {
+            { "Pressionar e Soltar (Tap)", "Tap" },
+            { "Manter Pressionado (Hold)", "Hold" },
+            { "Soltar Botão/Eixo (Release)", "Release" },
+            { "Pausa (Wait)", "Wait" }
+        };
+
+        // Traduz Botões (Tabela -> JSON)
+        private readonly Dictionary<string, string> _buttonToJson = new()
+        {
+            { "[Vazio / Apenas Pausa]", "None" },
+            { "Botão A", "A" }, { "Botão B", "B" }, { "Botão X", "X" }, { "Botão Y", "Y" },
+            { "D-Pad Cima", "Up" }, { "D-Pad Baixo", "Down" }, { "D-Pad Esquerda", "Left" }, { "D-Pad Direita", "Right" },
+            { "Ombro Esquerdo (LB)", "LB" }, { "Ombro Direito (RB)", "RB" },
+            { "Clique Analógico Esq (L3)", "L3" }, { "Clique Analógico Dir (R3)", "R3" },
+            { "Gatilho Esquerdo (LT)", "LT" }, { "Gatilho Direito (RT)", "RT" },
+            { "Analógico Esq - Cima", "LS_Up" }, { "Analógico Esq - Baixo", "LS_Down" },
+            { "Analógico Esq - Esquerda", "LS_Left" }, { "Analógico Esq - Direita", "LS_Right" },
+            { "Analógico Dir - Cima", "RS_Up" }, { "Analógico Dir - Baixo", "RS_Down" },
+            { "Analógico Dir - Esquerda", "RS_Left" }, { "Analógico Dir - Direita", "RS_Right" }
+        };
+
+        // Métodos para inverter a busca (JSON -> Tabela)
+        private string GetActionFromJson(string jsonAction)
+        {
+            foreach (var kvp in _actionToJson) if (kvp.Value == jsonAction) return kvp.Key;
+            return "Pausa (Wait)"; // Fallback seguro
+        }
+
+        private string GetButtonFromJson(string jsonButton)
+        {
+            foreach (var kvp in _buttonToJson) if (kvp.Value == jsonButton) return kvp.Key;
+            return "[Vazio / Apenas Pausa]"; // Fallback seguro
+        }
 
         // --- HOTKEYS GLOBAIS DO WINDOWS ---
         [DllImport("user32.dll")]
@@ -483,6 +526,118 @@ namespace AutoGamepad
             }
         }
 
+        // --- EXPORTA A TELA PARA UMA STRING JSON ---
+        private string ExportProfileToJson()
+        {
+            var profile = new AutoGamepadProfile
+            {
+                UseCycleLimit = chkLimitCycles.Checked,
+                MaxCycles = (int)numMaxCycles.Value,
+                EnableGlobalJitter = chkEnableJitter.Checked,
+                JitterFrequencyMs = (int)numJitterFreq.Value
+            };
+
+            foreach (DataGridViewRow row in gridSequence.Rows)
+            {
+                if (row.Cells["colAction"].Value == null) continue;
+
+                // Lê o nome da tela
+                string rawAction = row.Cells["colAction"].Value?.ToString() ?? "";
+                string rawButton = row.Cells["colButton"].Value?.ToString() ?? "";
+
+                var step = new SequenceStep
+                {
+                    // Converte pro nome curto usando o Dicionário
+                    Action = _actionToJson.ContainsKey(rawAction) ? _actionToJson[rawAction] : "Wait",
+                    Button = _buttonToJson.ContainsKey(rawButton) ? _buttonToJson[rawButton] : "None",
+
+                    ValuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100,
+                    RampMin = int.TryParse(row.Cells["colRampMin"].Value?.ToString(), out int rMin) ? rMin : 0,
+                    RampMax = int.TryParse(row.Cells["colRampMax"].Value?.ToString(), out int rMax) ? rMax : 0,
+                    WaitMin = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int tMin) ? tMin : 0,
+                    WaitMax = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int tMax) ? tMax : 0,
+                    JitterForce = int.TryParse(row.Cells["colJitter"].Value?.ToString(), out int jf) ? jf : 0
+                };
+
+                profile.Steps.Add(step);
+            }
+
+            var options = new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+            return JsonSerializer.Serialize(profile, options);
+        }
+
+        // --- IMPORTA UMA STRING JSON PARA A TELA ---
+        // O parâmetro isPreview diz se é só um teste do botão "Checar" (true) ou se veio de um arquivo salvo (false)
+        private bool ImportProfileFromJson(string jsonText, bool isPreview = false)
+        {
+            try
+            {
+                var profile = JsonSerializer.Deserialize<AutoGamepadProfile>(jsonText);
+                if (profile == null || profile.Steps == null) return false;
+
+                // --- CHECK DE SEGURANÇA (VALIDAÇÃO DE INTEGRIDADE DO JSON) ---
+                foreach (var step in profile.Steps)
+                {
+                    // Verifica se a Ação e o Botão do arquivo existem nos nossos dicionários oficiais
+                    if (!_actionToJson.ContainsValue(step.Action))
+                    {
+                        if (!isPreview) MessageBox.Show($"Ação desconhecida encontrada no arquivo: '{step.Action}'. O perfil não pode ser carregado.", "Arquivo Corrompido", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false; // Aborta tudo
+                    }
+
+                    if (!_buttonToJson.ContainsValue(step.Button))
+                    {
+                        if (!isPreview) MessageBox.Show($"Botão/Eixo desconhecido encontrado no arquivo: '{step.Button}'. O perfil não pode ser carregado.", "Arquivo Corrompido", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false; // Aborta tudo
+                    }
+                }
+
+                // Se passou pelo check de segurança, limpa a tabela para receber os dados
+                gridSequence.Rows.Clear();
+
+                chkLimitCycles.Checked = profile.UseCycleLimit;
+                numMaxCycles.Value = Math.Max(numMaxCycles.Minimum, Math.Min(numMaxCycles.Maximum, profile.MaxCycles));
+                chkEnableJitter.Checked = profile.EnableGlobalJitter;
+                numJitterFreq.Value = Math.Max(numJitterFreq.Minimum, Math.Min(numJitterFreq.Maximum, profile.JitterFrequencyMs));
+
+                foreach (var step in profile.Steps)
+                {
+                    int rowIndex = gridSequence.Rows.Add();
+                    var row = gridSequence.Rows[rowIndex];
+
+                    // Lê o nome curto do JSON e devolve a frase longa pra Tabela
+                    row.Cells["colAction"].Value = GetActionFromJson(step.Action);
+                    row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
+
+                    row.Cells["colValue"].Value = step.ValuePercent.ToString();
+                    row.Cells["colRampMin"].Value = step.RampMin.ToString();
+                    row.Cells["colRampMax"].Value = step.RampMax.ToString();
+                    row.Cells["colMinTime"].Value = step.WaitMin.ToString();
+                    row.Cells["colMaxTime"].Value = step.WaitMax.ToString();
+                    row.Cells["colJitter"].Value = step.JitterForce.ToString();
+
+                    gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
+                }
+
+                _sequenceNeedsValidation = true;
+
+                // Se não é só um preview, avisa o usuário que importou com sucesso e já roda a validação lógica
+                if (!isPreview)
+                {
+                    if (!ValidateSequence())
+                    {
+                        MessageBox.Show("Arquivo carregado, mas existem ERROS LÓGICOS (Tempo negativo ou ordem errada). Eles foram marcados em vermelho na tabela.", "Aviso de Lógica", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }
+
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         // Bloqueia e desbloqueia botões na tela
         private void ToggleUI(bool isIdle)
         {
@@ -634,6 +789,12 @@ namespace AutoGamepad
             buttonColumn.Items.Add("Analógico Dir - Baixo");
             buttonColumn.Items.Add("Analógico Dir - Esquerda");
             buttonColumn.Items.Add("Analógico Dir - Direita");
+
+            // BLOQUEIO DE ORDENAÇÃO: Impede o usuário de reordenar a tabela clicando no cabeçalho
+            foreach (DataGridViewColumn col in gridSequence.Columns)
+            {
+                col.SortMode = DataGridViewColumnSortMode.NotSortable;
+            }
         }
 
         // --- BOTÃO: ADICIONAR LINHA ---
@@ -937,13 +1098,19 @@ namespace AutoGamepad
                     }
                 }
 
-                // Checagem Matemática: Mínimos maiores que Máximos (Usa TryParse para evitar erro com o tracinho '-')
+                // Checagem Matemática de Tempos e Rampas (TryParse evita erro com o tracinho '-')
                 string strMinTime = row.Cells["colMinTime"].Value?.ToString() ?? "0";
                 string strMaxTime = row.Cells["colMaxTime"].Value?.ToString() ?? "0";
                 int minTime = int.TryParse(strMinTime, out int mt) ? mt : 0;
                 int maxTime = int.TryParse(strMaxTime, out int mxt) ? mxt : 0;
 
-                if (minTime > maxTime)
+                // Barre valores negativos importados do JSON
+                if (minTime < 0 || maxTime < 0)
+                {
+                    MarkRowAsError(row, "O Tempo de Duração não pode ser negativo.");
+                    isValid = false;
+                }
+                else if (minTime > maxTime)
                 {
                     MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
                     isValid = false;
@@ -954,20 +1121,41 @@ namespace AutoGamepad
                 int rampMin = int.TryParse(strRampMin, out int rm) ? rm : 0;
                 int rampMax = int.TryParse(strRampMax, out int rmx) ? rmx : 0;
 
-                if (rampMin > rampMax)
+                // Barre rampas negativas importadas do JSON
+                if (rampMin < 0 || rampMax < 0)
+                {
+                    MarkRowAsError(row, "O Tempo de Rampa não pode ser negativo.");
+                    isValid = false;
+                }
+                else if (rampMin > rampMax)
                 {
                     MarkRowAsError(row, "A Rampa Mínima não pode ser maior que a Rampa Máxima.");
                     isValid = false;
                 }
 
-                // Checagem Lógica: Manter eixo em 0%
+                string strJitter = row.Cells["colJitter"].Value?.ToString() ?? "0";
+                int jitterForce = int.TryParse(strJitter, out int jf) ? jf : 0;
+                if (jitterForce < 0)
+                {
+                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) não pode ser negativo.");
+                    isValid = false;
+                }
+
+                // Checagem Lógica: Manter eixo em 0% ou maior que 100%
                 bool isAxisVal = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
-                if (action == "Manter Pressionado (Hold)" && isAxisVal)
+                if (isAxisVal)
                 {
                     string strValEixo = row.Cells["colValue"].Value?.ToString() ?? "0";
                     int valEixo = int.TryParse(strValEixo, out int ve) ? ve : 0;
 
-                    if (valEixo == 0)
+                    // NOVA REGRA: Barre força de eixo inválida importada do JSON
+                    if (valEixo < 0 || valEixo > 100)
+                    {
+                        MarkRowAsError(row, "O Valor do Eixo deve estar entre 0% e 100%.");
+                        isValid = false;
+                    }
+
+                    if (action == "Manter Pressionado (Hold)" && valEixo == 0)
                     {
                         MarkRowAsError(row, "Manter um Eixo em 0% não tem efeito lógico. Use a ação 'Soltar'.");
                         isValid = false;
@@ -993,7 +1181,7 @@ namespace AutoGamepad
         {
             row.DefaultCellStyle.BackColor = System.Drawing.Color.LightCoral;
             row.ErrorText = message;
-            // Imprime o erro no console preto para o usuário achar fácil!
+            // Imprime o erro no console preto para o usuário achar fácil
             Log($"[ERRO NA LINHA {row.Index + 1}] {message}");
         }
 
@@ -1008,5 +1196,170 @@ namespace AutoGamepad
             // Ativa ou desativa a caixa de Frequência quando o usuário marca/desmarca o Jitter
             numJitterFreq.Enabled = chkEnableJitter.Checked;
         }
+
+        // --- DETECTA MUDANÇA DE ABA (Tabela <-> Código) ---
+        private void tabEditor_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            // Se o usuário foi para a Aba 1 (Índice 1 = A aba de Código)
+            if (tabEditor.SelectedIndex == 1)
+            {
+                // Verifica se a tabela tem erros matemáticos primeiro
+                if (!ValidateSequence())
+                {
+                    MessageBox.Show("Corrija os erros na tabela antes de visualizar o código.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    tabEditor.SelectedIndex = 0; // Joga ele de volta pra tabela
+                    return;
+                }
+
+                // Tabela OK! Gera o texto JSON e joga na caixa preta
+                txtJsonCode.Text = ExportProfileToJson();
+            }
+        }
+
+        // --- BOTÃO COPIAR ---
+        private void btnJsonCopy_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrWhiteSpace(txtJsonCode.Text))
+            {
+                Clipboard.SetText(txtJsonCode.Text);
+                MessageBox.Show("Código copiado para a área de transferência!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        // --- BOTÃO COLAR ---
+        private void btnJsonPaste_Click(object sender, EventArgs e)
+        {
+            if (Clipboard.ContainsText())
+            {
+                txtJsonCode.Text = Clipboard.GetText();
+            }
+        }
+
+        // --- BOTÃO CHECAR SINTAXE (Aba JSON) ---
+        private void btnJsonValidate_Click(object sender, EventArgs e)
+        {
+            // Tenta importar. Passamos 'true' pois é só um Preview (não queremos o popup de sucesso do import)
+            bool success = ImportProfileFromJson(txtJsonCode.Text, true);
+
+            if (success)
+            {
+                // Se a sintaxe JSON tava certa, roda o validador lógico pra checar os negativos
+                if (!ValidateSequence())
+                {
+                    MessageBox.Show("Sintaxe JSON correta, mas existem ERROS LÓGICOS (Tempo negativo, ordens inválidas). Corrija na Tabela Visual.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                else
+                {
+                    MessageBox.Show("Sintaxe JSON e Lógica Perfeitas! A tabela visual foi atualizada.", "Validado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            else
+            {
+                MessageBox.Show("Erro de Sintaxe no JSON! Verifique se você não apagou vírgulas ou chaves '{}'.", "Erro Fatal", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        // --- BOTÃO: SALVAR PERFIL (GERA O ARQUIVO .JSON) ---
+        private void btnSaveProfile_Click(object sender, EventArgs e)
+        {
+            // Roda o validador lógico primeiro (Avisa o usuário, mas não o impede de salvar com erros)
+            if (!ValidateSequence())
+            {
+                var dialogResult = MessageBox.Show("Sua sequência possui ERROS LÓGICOS (linhas vermelhas). Se salvar assim, não será possível iniciar a automação depois.\n\nDeseja salvar o arquivo mesmo assim?", "Aviso de Validação", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+
+                if (dialogResult == DialogResult.No) return; // O cara desistiu de salvar
+            }
+
+            // Pega o texto da tabela convertido em JSON
+            string jsonContent = ExportProfileToJson();
+
+            // Abre a janela do Windows para salvar o arquivo
+            using (SaveFileDialog sfd = new SaveFileDialog())
+            {
+                sfd.Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json";
+                sfd.Title = "Salvar Perfil de Automação";
+                sfd.FileName = "MeuPerfil.json"; // Sugestão de nome
+
+                if (sfd.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        // Escreve o texto gerado no arquivo escolhido
+                        File.WriteAllText(sfd.FileName, jsonContent);
+                        MessageBox.Show("Perfil salvo com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Erro ao tentar salvar o arquivo: {ex.Message}", "Erro de Gravação", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+
+        // --- BOTÃO: CARREGAR PERFIL (LÊ O ARQUIVO .JSON) ---
+        private void btnLoadProfile_Click(object sender, EventArgs e)
+        {
+            // Abre a janela do Windows para buscar o arquivo
+            using (OpenFileDialog ofd = new OpenFileDialog())
+            {
+                ofd.Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json";
+                ofd.Title = "Carregar Perfil de Automação";
+
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    try
+                    {
+                        // Lê o texto do arquivo
+                        string jsonContent = File.ReadAllText(ofd.FileName);
+
+                        // Tenta jogar pra tabela usando a função que já fizemos
+                        // Passamos 'false' pra avisar que é um import real, assim ele roda a validação pesada
+                        bool success = ImportProfileFromJson(jsonContent, false);
+
+                        if (success)
+                        {
+                            // Joga o texto lido na aba Código também para sincronizar a tela
+                            txtJsonCode.Text = jsonContent;
+                            MessageBox.Show("Perfil carregado com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
+                        else
+                        {
+                            MessageBox.Show("O arquivo selecionado está corrompido ou possui formatação JSON inválida. O Perfil não pôde ser carregado.", "Erro Crítico", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show($"Erro ao tentar abrir o arquivo: {ex.Message}", "Erro de Leitura", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    }
+                }
+            }
+        }
+    }
+
+    // --- MOLDES PARA SALVAR O JSON ---
+
+    // Representa o Perfil Completo (O Arquivo todo)
+    public class AutoGamepadProfile
+    {
+        public bool UseCycleLimit { get; set; }
+        public int MaxCycles { get; set; }
+        public bool EnableGlobalJitter { get; set; }
+        public int JitterFrequencyMs { get; set; }
+
+        // A lista de passos da tabela
+        public List<SequenceStep> Steps { get; set; } = new List<SequenceStep>();
+    }
+
+    // Representa uma única linha da Tabela
+    public class SequenceStep
+    {
+        public string Action { get; set; } = "";
+        public string Button { get; set; } = "";
+        public int ValuePercent { get; set; }
+        public int RampMin { get; set; }
+        public int RampMax { get; set; }
+        public int WaitMin { get; set; }
+        public int WaitMax { get; set; }
+        public int JitterForce { get; set; }
     }
 }
