@@ -40,12 +40,6 @@
             btnRowRemove = new Button();
             btnRowAdd = new Button();
             gridSequence = new DataGridView();
-            colAction = new DataGridViewComboBoxColumn();
-            colButton = new DataGridViewComboBoxColumn();
-            colValue = new DataGridViewTextBoxColumn();
-            colMinTime = new DataGridViewTextBoxColumn();
-            colMaxTime = new DataGridViewTextBoxColumn();
-            colJitter = new DataGridViewTextBoxColumn();
             tabPage2 = new TabPage();
             btnJsonValidate = new Button();
             btnJsonPaste = new Button();
@@ -55,11 +49,22 @@
             button2 = new Button();
             chkLimitCycles = new CheckBox();
             numMaxCycles = new NumericUpDown();
+            colAction = new DataGridViewComboBoxColumn();
+            colButton = new DataGridViewComboBoxColumn();
+            colValue = new DataGridViewTextBoxColumn();
+            colRampMin = new DataGridViewTextBoxColumn();
+            colRampMax = new DataGridViewTextBoxColumn();
+            colMinTime = new DataGridViewTextBoxColumn();
+            colMaxTime = new DataGridViewTextBoxColumn();
+            colJitter = new DataGridViewTextBoxColumn();
+            chkEnableJitter = new CheckBox();
+            numJitterFreq = new NumericUpDown();
             tabEditor.SuspendLayout();
             tabPage1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)gridSequence).BeginInit();
             tabPage2.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)numMaxCycles).BeginInit();
+            ((System.ComponentModel.ISupportInitialize)numJitterFreq).BeginInit();
             SuspendLayout();
             // 
             // btnStart
@@ -111,11 +116,11 @@
             chkSound.AutoSize = true;
             chkSound.Checked = true;
             chkSound.CheckState = CheckState.Checked;
-            chkSound.Location = new Point(471, 15);
+            chkSound.Location = new Point(482, 15);
             chkSound.Name = "chkSound";
-            chkSound.Size = new Size(132, 24);
+            chkSound.Size = new Size(129, 24);
             chkSound.TabIndex = 18;
-            chkSound.Text = "🔊 Emitir Som:";
+            chkSound.Text = "🔊 Emitir Som";
             chkSound.UseVisualStyleBackColor = true;
             // 
             // tabEditor
@@ -123,10 +128,10 @@
             tabEditor.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             tabEditor.Controls.Add(tabPage1);
             tabEditor.Controls.Add(tabPage2);
-            tabEditor.Location = new Point(0, 54);
+            tabEditor.Location = new Point(0, 116);
             tabEditor.Name = "tabEditor";
             tabEditor.SelectedIndex = 0;
-            tabEditor.Size = new Size(1186, 439);
+            tabEditor.Size = new Size(1186, 377);
             tabEditor.TabIndex = 19;
             // 
             // tabPage1
@@ -139,7 +144,7 @@
             tabPage1.Location = new Point(4, 29);
             tabPage1.Name = "tabPage1";
             tabPage1.Padding = new Padding(3);
-            tabPage1.Size = new Size(1178, 406);
+            tabPage1.Size = new Size(1178, 344);
             tabPage1.TabIndex = 0;
             tabPage1.Text = "Visual (Tabela)";
             tabPage1.UseVisualStyleBackColor = true;
@@ -195,56 +200,18 @@
             gridSequence.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             gridSequence.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             gridSequence.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colValue, colMinTime, colMaxTime, colJitter });
+            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colValue, colRampMin, colRampMax, colMinTime, colMaxTime, colJitter });
             gridSequence.Location = new Point(3, 6);
             gridSequence.MinimumSize = new Size(0, 188);
             gridSequence.MultiSelect = false;
             gridSequence.Name = "gridSequence";
             gridSequence.RowHeadersWidth = 51;
             gridSequence.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
-            gridSequence.Size = new Size(1042, 394);
+            gridSequence.Size = new Size(1042, 332);
             gridSequence.TabIndex = 0;
             gridSequence.CellValidating += gridSequence_CellValidating;
             gridSequence.CellValueChanged += gridSequence_CellValueChanged;
             gridSequence.EditingControlShowing += gridSequence_EditingControlShowing;
-            // 
-            // colAction
-            // 
-            colAction.FillWeight = 120F;
-            colAction.HeaderText = "Ação";
-            colAction.MinimumWidth = 6;
-            colAction.Name = "colAction";
-            // 
-            // colButton
-            // 
-            colButton.FillWeight = 150F;
-            colButton.HeaderText = "Botão/Eixo";
-            colButton.MinimumWidth = 6;
-            colButton.Name = "colButton";
-            // 
-            // colValue
-            // 
-            colValue.HeaderText = "Valor Eixo (0-100%)";
-            colValue.MinimumWidth = 6;
-            colValue.Name = "colValue";
-            // 
-            // colMinTime
-            // 
-            colMinTime.HeaderText = "Tempo Min (ms)";
-            colMinTime.MinimumWidth = 6;
-            colMinTime.Name = "colMinTime";
-            // 
-            // colMaxTime
-            // 
-            colMaxTime.HeaderText = "Tempo Max (ms)";
-            colMaxTime.MinimumWidth = 6;
-            colMaxTime.Name = "colMaxTime";
-            // 
-            // colJitter
-            // 
-            colJitter.HeaderText = "Tremor Eixo (Jitter)";
-            colJitter.MinimumWidth = 6;
-            colJitter.Name = "colJitter";
             // 
             // tabPage2
             // 
@@ -325,7 +292,7 @@
             // chkLimitCycles
             // 
             chkLimitCycles.AutoSize = true;
-            chkLimitCycles.Location = new Point(639, 15);
+            chkLimitCycles.Location = new Point(12, 54);
             chkLimitCycles.Name = "chkLimitCycles";
             chkLimitCycles.Size = new Size(123, 24);
             chkLimitCycles.TabIndex = 22;
@@ -336,7 +303,7 @@
             // numMaxCycles
             // 
             numMaxCycles.Enabled = false;
-            numMaxCycles.Location = new Point(768, 14);
+            numMaxCycles.Location = new Point(190, 53);
             numMaxCycles.Maximum = new decimal(new int[] { 99999, 0, 0, 0 });
             numMaxCycles.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
             numMaxCycles.Name = "numMaxCycles";
@@ -344,11 +311,84 @@
             numMaxCycles.TabIndex = 23;
             numMaxCycles.Value = new decimal(new int[] { 1, 0, 0, 0 });
             // 
+            // colAction
+            // 
+            colAction.FillWeight = 120F;
+            colAction.HeaderText = "Ação";
+            colAction.MinimumWidth = 6;
+            colAction.Name = "colAction";
+            // 
+            // colButton
+            // 
+            colButton.FillWeight = 150F;
+            colButton.HeaderText = "Botão/Eixo";
+            colButton.MinimumWidth = 6;
+            colButton.Name = "colButton";
+            // 
+            // colValue
+            // 
+            colValue.HeaderText = "Valor Eixo (0-100%)";
+            colValue.MinimumWidth = 6;
+            colValue.Name = "colValue";
+            // 
+            // colRampMin
+            // 
+            colRampMin.HeaderText = "Rampa Min (ms)";
+            colRampMin.MinimumWidth = 6;
+            colRampMin.Name = "colRampMin";
+            // 
+            // colRampMax
+            // 
+            colRampMax.HeaderText = "Rampa Max (ms)";
+            colRampMax.MinimumWidth = 6;
+            colRampMax.Name = "colRampMax";
+            // 
+            // colMinTime
+            // 
+            colMinTime.HeaderText = "Tempo Min (ms)";
+            colMinTime.MinimumWidth = 6;
+            colMinTime.Name = "colMinTime";
+            // 
+            // colMaxTime
+            // 
+            colMaxTime.HeaderText = "Tempo Max (ms)";
+            colMaxTime.MinimumWidth = 6;
+            colMaxTime.Name = "colMaxTime";
+            // 
+            // colJitter
+            // 
+            colJitter.HeaderText = "Tremor Eixo (Jitter)";
+            colJitter.MinimumWidth = 6;
+            colJitter.Name = "colJitter";
+            // 
+            // chkEnableJitter
+            // 
+            chkEnableJitter.AutoSize = true;
+            chkEnableJitter.Location = new Point(12, 86);
+            chkEnableJitter.Name = "chkEnableJitter";
+            chkEnableJitter.Size = new Size(172, 24);
+            chkEnableJitter.TabIndex = 24;
+            chkEnableJitter.Text = "Ativar Tremor (Eixos):";
+            chkEnableJitter.UseVisualStyleBackColor = true;
+            chkEnableJitter.CheckedChanged += chkEnableJitter_CheckedChanged;
+            // 
+            // numJitterFreq
+            // 
+            numJitterFreq.Location = new Point(190, 85);
+            numJitterFreq.Maximum = new decimal(new int[] { 1000, 0, 0, 0 });
+            numJitterFreq.Minimum = new decimal(new int[] { 10, 0, 0, 0 });
+            numJitterFreq.Name = "numJitterFreq";
+            numJitterFreq.Size = new Size(150, 27);
+            numJitterFreq.TabIndex = 25;
+            numJitterFreq.Value = new decimal(new int[] { 100, 0, 0, 0 });
+            // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1186, 649);
+            Controls.Add(numJitterFreq);
+            Controls.Add(chkEnableJitter);
             Controls.Add(numMaxCycles);
             Controls.Add(chkLimitCycles);
             Controls.Add(button2);
@@ -366,6 +406,7 @@
             ((System.ComponentModel.ISupportInitialize)gridSequence).EndInit();
             tabPage2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)numMaxCycles).EndInit();
+            ((System.ComponentModel.ISupportInitialize)numJitterFreq).EndInit();
             ResumeLayout(false);
             PerformLayout();
         }
@@ -391,13 +432,17 @@
         private Button btnJsonCopy;
         private Button button1;
         private Button button2;
+        private CheckBox chkLimitCycles;
+        private NumericUpDown numMaxCycles;
         private DataGridViewComboBoxColumn colAction;
         private DataGridViewComboBoxColumn colButton;
         private DataGridViewTextBoxColumn colValue;
+        private DataGridViewTextBoxColumn colRampMin;
+        private DataGridViewTextBoxColumn colRampMax;
         private DataGridViewTextBoxColumn colMinTime;
         private DataGridViewTextBoxColumn colMaxTime;
         private DataGridViewTextBoxColumn colJitter;
-        private CheckBox chkLimitCycles;
-        private NumericUpDown numMaxCycles;
+        private CheckBox chkEnableJitter;
+        private NumericUpDown numJitterFreq;
     }
 }

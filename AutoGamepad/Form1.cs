@@ -27,6 +27,8 @@ namespace AutoGamepad
         private IXbox360Controller? _controller;
         private CancellationTokenSource? _cancellationTokenSource;
         private Random _rnd = new Random();
+        // Memória do motor físico (Guarda a força atual de cada eixo 0-100%)
+        private System.Collections.Generic.Dictionary<string, float> _axisStates = new();
         private bool _sequenceNeedsValidation = true;
 
         // --- HOTKEYS GLOBAIS DO WINDOWS ---
@@ -145,23 +147,20 @@ namespace AutoGamepad
             _cancellationTokenSource?.Cancel(); // Avisa o loop para abortar
         }
 
-        // --- AUTOMAÇÃO ---
+        // --- A AUTOMAÇÃO ---
         private async Task RunAutomationAsync(CancellationToken token)
         {
-            // Coloca o controle em "Ponto Morto" para garantir que nada ficou apertado da vez anterior
+            // Coloca o controle em "Ponto Morto"
             ResetControllerState();
 
-            // 1. Lê a configuração de Ciclos da tela
             bool useLimit = chkLimitCycles.Checked;
             int maxCycles = (int)numMaxCycles.Value;
 
             Log("Iniciando execução da tabela de sequências...");
 
-            // Loop Infinito até o usuário apertar Parar ou atingir o limite de ciclos
             int loopCount = 1;
             while (!token.IsCancellationRequested)
             {
-                // Verifica o limite de ciclos (Se for maior que o máximo, ele para e quebra o loop)
                 if (useLimit && loopCount > maxCycles)
                 {
                     Log($"\n[INFO] Limite de {maxCycles} ciclos atingido. Finalizando com sucesso.");
@@ -170,57 +169,189 @@ namespace AutoGamepad
 
                 Log($"\n=== Iniciando Ciclo {loopCount} ===");
 
-                // Varre a tabela linha por linha
                 for (int i = 0; i < gridSequence.Rows.Count; i++)
                 {
-                    // Se apertar Parar no meio da tabela, ele aborta na hora
                     if (token.IsCancellationRequested) break;
 
                     var row = gridSequence.Rows[i];
-                    if (row.Cells["colAction"].Value == null) continue; // Pula linha vazia
+                    if (row.Cells["colAction"].Value == null) continue;
 
-                    // Lê os dados da coluna atual
                     string action = row.Cells["colAction"].Value?.ToString() ?? "";
                     string button = row.Cells["colButton"].Value?.ToString() ?? "";
 
-                    // Converte os textos para números com segurança (Ternário para evitar nulos)
+                    // Converte os textos com segurança
                     int valuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100;
-                    int minTime = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int min) ? min : 0;
-                    int maxTime = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int max) ? max : 0;
+                    int rampMin = int.TryParse(row.Cells["colRampMin"].Value?.ToString(), out int rMin) ? rMin : 0;
+                    int rampMax = int.TryParse(row.Cells["colRampMax"].Value?.ToString(), out int rMax) ? rMax : 0;
+                    int timeMin = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int tMin) ? tMin : 0;
+                    int timeMax = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int tMax) ? tMax : 0;
+                    int jitterForce = int.TryParse(row.Cells["colJitter"].Value?.ToString(), out int jF) ? jF : 0;
 
-                    // Sorteia o tempo (Jitter de Tempo)
-                    int waitTime = _rnd.Next(minTime, maxTime + 1);
+                    // Sorteia os Tempos (O Jitter Temporal)
+                    int rampTime = _rnd.Next(rampMin, rampMax + 1);
+                    int actionTime = _rnd.Next(timeMin, timeMax + 1);
 
-                    Log($"[Linha {i + 1}] {action} [{button}] -> Força: {valuePercent}% | Tempo: {waitTime}ms");
+                    bool isAxis = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
 
-                    // 1. Se for apenas PAUSA
-                    if (action == "Pausa (Wait)")
+                    // Log super detalhado da ação que está acontecendo
+                    if (action.Contains("Pausa"))
                     {
-                        await Task.Delay(waitTime, token);
-                        continue; // Pula pro próximo passo da tabela
+                        Log($"[Linha {i + 1}] ⏳ PAUSA | Duração: {actionTime}ms");
+                    }
+                    else if (isAxis)
+                    {
+                        Log($"[Linha {i + 1}] 🎮 {action} [{button}] -> Alvo: {valuePercent}% | Rampa: {rampTime}ms | Platô: {actionTime}ms | Jitter: ±{jitterForce}%");
+                    }
+                    else
+                    {
+                        Log($"[Linha {i + 1}] 🔘 {action} [{button}] -> Duração: {actionTime}ms");
                     }
 
-                    // 2. Envia o sinal de PRESSIONAR pro controle
-                    if (action == "Pressionar e Soltar (Tap)" || action == "Manter Pressionado (Hold)")
+                    // 1. PAUSA GERAL
+                    if (action.Contains("Pausa"))
                     {
-                        ProcessHardwareInput(button, valuePercent, true);
-                    }
-                    else if (action == "Soltar Botão/Eixo (Release)")
-                    {
-                        ProcessHardwareInput(button, 0, false);
+                        await Task.Delay(actionTime, token);
+                        continue;
                     }
 
-                    // 3. Aguarda o tempo estipulado da ação
-                    await Task.Delay(waitTime, token);
-
-                    // 4. Se for TAP, precisa soltar o botão automaticamente logo após a pausa!
-                    if (action == "Pressionar e Soltar (Tap)")
+                    // 2. AÇÕES PARA EIXOS / GATILHOS (Usa o Motor Físico)
+                    if (isAxis)
                     {
-                        ProcessHardwareInput(button, 0, false);
+                        if (action.Contains("Pressionar e Soltar")) // Tap
+                        {
+                            // Sobe a rampa, segura pelo tempo tremendo, e depois desce a rampa de volta a zero
+                            await ExecuteAxisActionAsync(button, valuePercent, rampTime, actionTime, jitterForce, token);
+                            await ExecuteAxisActionAsync(button, 0, rampTime, 0, 0, token);
+                        }
+                        else if (action.Contains("Manter Pressionado")) // Hold
+                        {
+                            // Apenas sobe a rampa até o valor e abandona lá (Hold não tem tempo de pausa)
+                            await ExecuteAxisActionAsync(button, valuePercent, rampTime, 0, jitterForce, token);
+                        }
+                        else if (action.Contains("Soltar")) // Release
+                        {
+                            // Desce a rampa suavemente até 0
+                            await ExecuteAxisActionAsync(button, 0, rampTime, 0, 0, token);
+                        }
+                    }
+                    // 3. AÇÕES PARA BOTÕES DIGITAIS (Instantanêo)
+                    else
+                    {
+                        if (action.Contains("Pressionar e Soltar"))
+                        {
+                            ProcessHardwareInput(button, 100, true);
+                            await Task.Delay(actionTime, token);
+                            ProcessHardwareInput(button, 0, false);
+                        }
+                        else if (action.Contains("Manter Pressionado"))
+                        {
+                            ProcessHardwareInput(button, 100, true);
+                        }
+                        else if (action.Contains("Soltar"))
+                        {
+                            ProcessHardwareInput(button, 0, false);
+                        }
                     }
                 }
-
                 loopCount++;
+            }
+        }
+
+        // --- MOTOR FÍSICO: EXECUTA RAMPAS E JITTER EM EIXOS (60 FPS) ---
+        private async Task ExecuteAxisActionAsync(string buttonName, int targetValuePercent, int rampTime, int holdTime, int jitterForce, CancellationToken token)
+        {
+            // Descobre de onde estamos partindo na memória
+            if (!_axisStates.ContainsKey(buttonName)) _axisStates[buttonName] = 0f;
+            float startValue = _axisStates[buttonName];
+
+            bool useJitter = chkEnableJitter.Checked && jitterForce > 0;
+            int jitterFreq = (int)numJitterFreq.Value;
+
+            // FAST-PATH: Se não tem rampa e não tem Jitter, vai instantâneo. (Poupa CPU)
+            if (rampTime == 0 && !useJitter)
+            {
+                ProcessHardwareInput(buttonName, targetValuePercent, true);
+                _axisStates[buttonName] = targetValuePercent;
+                if (holdTime > 0) await Task.Delay(holdTime, token);
+                return;
+            }
+
+            // ADVANCED-PATH: O Game Loop de 60Hz (~16ms por frame)
+            const int frameDelay = 16;
+            int currentJitter = 0;
+            int timeSinceLastJitter = jitterFreq;
+
+            // FASE 1: A RAMPA
+            if (rampTime > 0)
+            {
+                int elapsedTime = 0;
+                while (elapsedTime < rampTime)
+                {
+                    if (token.IsCancellationRequested) return;
+
+                    // Interpolação Linear (Lerp): Acha o valor exato na curva de subida
+                    float progress = (float)elapsedTime / rampTime;
+                    float currentValue = startValue + (targetValuePercent - startValue) * progress;
+
+                    // Calcula o Tremor Físico
+                    if (useJitter)
+                    {
+                        timeSinceLastJitter += frameDelay;
+                        if (timeSinceLastJitter >= jitterFreq)
+                        {
+                            currentJitter = _rnd.Next(-jitterForce, jitterForce + 1);
+                            timeSinceLastJitter = 0;
+                        }
+                    }
+
+                    // Grampeia (Clamp) pra não estourar os limites de 0 a 100%
+                    int finalValue = (int)Math.Max(0, Math.Min(100, currentValue + currentJitter));
+
+                    ProcessHardwareInput(buttonName, finalValue, true);
+
+                    await Task.Delay(frameDelay, token);
+                    elapsedTime += frameDelay;
+                }
+            }
+
+            // Fim da rampa: Salva o alvo na memória para o próximo movimento começar daqui
+            _axisStates[buttonName] = targetValuePercent;
+            ProcessHardwareInput(buttonName, targetValuePercent, true);
+
+            // FASE 2: O PLATÔ (Segurar o botão por X milissegundos)
+            if (holdTime > 0)
+            {
+                if (useJitter) // Se tiver jitter, continua tremendo enquanto segura
+                {
+                    int elapsedTime = 0;
+                    timeSinceLastJitter = jitterFreq; // Reseta
+
+                    while (elapsedTime < holdTime)
+                    {
+                        if (token.IsCancellationRequested) return;
+
+                        timeSinceLastJitter += frameDelay;
+                        if (timeSinceLastJitter >= jitterFreq)
+                        {
+                            currentJitter = _rnd.Next(-jitterForce, jitterForce + 1);
+                            timeSinceLastJitter = 0;
+
+                            int finalValue = (int)Math.Max(0, Math.Min(100, targetValuePercent + currentJitter));
+                            ProcessHardwareInput(buttonName, finalValue, true);
+                        }
+
+                        await Task.Delay(frameDelay, token);
+                        elapsedTime += frameDelay;
+                    }
+
+                    // Terminou de segurar, devolve pro valor base cravado
+                    ProcessHardwareInput(buttonName, targetValuePercent, true);
+                }
+                else
+                {
+                    // Sem jitter no platô? Dá um Delay direto pra poupar o processador!
+                    await Task.Delay(holdTime, token);
+                }
             }
         }
 
@@ -305,6 +436,9 @@ namespace AutoGamepad
         {
             if (_controller == null) return;
 
+            // Zera a memória matemática do Motor Físico
+            _axisStates.Clear();
+
             // Zera Botões Digitais
             _controller.SetButtonState(Xbox360Button.A, false);
             _controller.SetButtonState(Xbox360Button.B, false);
@@ -329,6 +463,7 @@ namespace AutoGamepad
             _controller.SetAxisValue(Xbox360Axis.RightThumbX, 0);
             _controller.SetAxisValue(Xbox360Axis.RightThumbY, 0);
         }
+
 
         // --- DESCONECTA E LIMPA A MEMÓRIA ---
         private void DisconnectController()
@@ -363,8 +498,13 @@ namespace AutoGamepad
             chkLimitCycles.Enabled = isIdle;
             chkSound.Enabled = isIdle;
 
-            // Só libera a caixinha de número se estiver em "Idle" E o Checkbox de limite estiver marcado!
+            // Só libera a caixinha de número se estiver em "Idle" E o Checkbox de limite estiver marcado
             numMaxCycles.Enabled = isIdle && chkLimitCycles.Checked;
+
+            // --- Travas do Jitter Global ---
+            chkEnableJitter.Enabled = isIdle;
+            // Só libera a frequência se estiver em Idle E o checkbox de tremor estiver marcado
+            numJitterFreq.Enabled = isIdle && chkEnableJitter.Checked;
         }
 
         // Escreve na caixa preta e rola pra baixo
@@ -499,24 +639,23 @@ namespace AutoGamepad
         // --- BOTÃO: ADICIONAR LINHA ---
         private void btnRowAdd_Click(object sender, EventArgs e)
         {
-            // Cria uma linha nova e guarda qual é o índice dela
             int rowIndex = gridSequence.Rows.Add();
 
-            // Preenche as caixas de Ação e Botão com valores padrão pra não ficar vazio
             gridSequence.Rows[rowIndex].Cells["colAction"].Value = "Pressionar e Soltar (Tap)";
             gridSequence.Rows[rowIndex].Cells["colButton"].Value = "Botão A";
 
-            // Coloca valores padrão de tempo (100ms) e força (100%)
+            // Coloca valores padrão em tudo pra não ficar vazio
             gridSequence.Rows[rowIndex].Cells["colValue"].Value = "100";
+            gridSequence.Rows[rowIndex].Cells["colRampMin"].Value = "0";
+            gridSequence.Rows[rowIndex].Cells["colRampMax"].Value = "0";
             gridSequence.Rows[rowIndex].Cells["colMinTime"].Value = "100";
             gridSequence.Rows[rowIndex].Cells["colMaxTime"].Value = "100";
             gridSequence.Rows[rowIndex].Cells["colJitter"].Value = "0";
 
-            // Rola a tabela para baixo automaticamente para mostrar a nova linha
             gridSequence.FirstDisplayedScrollingRowIndex = rowIndex;
 
-            // Força a tabela a checar a regra do valor da célula assim que a linha nasce
-            gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
+            // Força a tabela a checar a regra assim que a linha nasce
+            gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colAction"]!.Index, rowIndex));
 
             _sequenceNeedsValidation = true;
         }
@@ -539,52 +678,78 @@ namespace AutoGamepad
             _sequenceNeedsValidation = true;
         }
 
-        // --- DETECTA MUDANÇAS DENTRO DA TABELA ---
+        // --- DETECTA MUDANÇAS DENTRO DA TABELA E BLOQUEIA CÉLULAS ---
         private void gridSequence_CellValueChanged(object sender, DataGridViewCellEventArgs e)
         {
-            // Ignora se o usuário clicou no cabeçalho (linha -1)
             if (e.RowIndex < 0) return;
 
-            // Se a coluna alterada for "Botão/Eixo" (colButton)
-            if (gridSequence.Columns[e.ColumnIndex].Name == "colButton")
+            string colName = gridSequence.Columns[e.ColumnIndex].Name;
+
+            // Se o usuário alterou a Ação ou o Botão, recalcula as travas
+            if (colName == "colAction" || colName == "colButton")
             {
-                var selectedButton = gridSequence.Rows[e.RowIndex].Cells["colButton"].Value?.ToString();
+                var row = gridSequence.Rows[e.RowIndex];
+                string action = row.Cells["colAction"].Value?.ToString() ?? "";
+                string button = row.Cells["colButton"].Value?.ToString() ?? "";
 
-                // Pega duas células: O Valor e o Tremor(Jitter)
-                var valueCell = gridSequence.Rows[e.RowIndex].Cells["colValue"];
-                var jitterCell = gridSequence.Rows[e.RowIndex].Cells["colJitter"];
+                bool isAxis = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
 
-                // Checa com precisão se é um Gatilho ou Movimento de Analógico 
-                // (Ignora D-Pads e os Cliques L3/R3 que começam com outras palavras)
-                bool isAxis = selectedButton != null && (
-                              selectedButton.StartsWith("Gatilho") ||
-                              selectedButton.StartsWith("Analógico"));
+                // Células da linha
+                var cellValue = row.Cells["colValue"];
+                var cellRampMin = row.Cells["colRampMin"];
+                var cellRampMax = row.Cells["colRampMax"];
+                var cellTimeMin = row.Cells["colMinTime"];
+                var cellTimeMax = row.Cells["colMaxTime"];
+                var cellJitter = row.Cells["colJitter"];
 
-                if (isAxis)
+                // Função auxiliar interna para pintar a célula e definir valor padrão
+                void SetCellState(DataGridViewCell cell, bool enabled, string defaultValue = "-")
                 {
-                    // É um eixo de movimento/gatilho. Libera tudo.
-                    valueCell.ReadOnly = false;
-                    valueCell.Style.BackColor = System.Drawing.Color.White;
-                    if (valueCell.Value?.ToString() == "-") valueCell.Value = "100";
-
-                    jitterCell.ReadOnly = false;
-                    jitterCell.Style.BackColor = System.Drawing.Color.White;
-                    if (jitterCell.Value?.ToString() == "-") jitterCell.Value = "0"; // Tremor 0 por padrão
+                    cell.ReadOnly = !enabled;
+                    cell.Style.BackColor = enabled ? System.Drawing.Color.White : System.Drawing.Color.LightGray;
+                    if (!enabled) cell.Value = "-";
+                    else if (cell.Value?.ToString() == "-") cell.Value = defaultValue;
                 }
-                else
-                {
-                    // É um botão normal ou pausa. Bloqueia tudo.
-                    valueCell.ReadOnly = true;
-                    valueCell.Style.BackColor = System.Drawing.Color.LightGray;
-                    valueCell.Value = "-";
 
-                    jitterCell.ReadOnly = true;
-                    jitterCell.Style.BackColor = System.Drawing.Color.LightGray;
-                    jitterCell.Value = "-";
+                // Aplica a lógica física exata para cada tipo de ação
+                if (action.Contains("Pausa"))
+                {
+                    SetCellState(cellValue, false);
+                    SetCellState(cellRampMin, false);
+                    SetCellState(cellRampMax, false);
+                    SetCellState(cellTimeMin, true, "100");
+                    SetCellState(cellTimeMax, true, "100");
+                    SetCellState(cellJitter, false);
+                }
+                else if (action.Contains("Pressionar e Soltar")) // Tap
+                {
+                    SetCellState(cellValue, isAxis, "100");
+                    SetCellState(cellRampMin, isAxis, "0");
+                    SetCellState(cellRampMax, isAxis, "0");
+                    SetCellState(cellTimeMin, true, "100");
+                    SetCellState(cellTimeMax, true, "100");
+                    SetCellState(cellJitter, isAxis, "0");
+                }
+                else if (action.Contains("Manter Pressionado")) // Hold
+                {
+                    SetCellState(cellValue, isAxis, "100");
+                    SetCellState(cellRampMin, isAxis, "0");
+                    SetCellState(cellRampMax, isAxis, "0");
+                    SetCellState(cellTimeMin, false);
+                    SetCellState(cellTimeMax, false);
+                    SetCellState(cellJitter, isAxis, "0");
+                }
+                else if (action.Contains("Soltar")) // Release
+                {
+                    SetCellState(cellValue, false);
+                    SetCellState(cellRampMin, isAxis, "0");
+                    SetCellState(cellRampMax, isAxis, "0");
+                    SetCellState(cellTimeMin, false);
+                    SetCellState(cellTimeMax, false);
+                    SetCellState(cellJitter, false);
                 }
             }
 
-            // Sinaliza o Dirty Flag para o Validador
             _sequenceNeedsValidation = true;
         }
 
@@ -604,7 +769,7 @@ namespace AutoGamepad
                 int colIndex = gridSequence.CurrentCell.ColumnIndex;
                 string colName = gridSequence.Columns[colIndex].Name;
 
-                if (colName == "colValue" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+                if (colName == "colValue" || colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
                 {
                     // Se for, monitora o teclado
                     tb.KeyPress += TextBox_KeyPress;
@@ -628,7 +793,7 @@ namespace AutoGamepad
         {
             string colName = gridSequence.Columns[e.ColumnIndex].Name;
 
-            if (colName == "colValue" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+            if (colName == "colValue" || colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
             {
                 // Pega o valor com segurança contra nulos
                 string newText = e.FormattedValue?.ToString() ?? "";
@@ -654,7 +819,7 @@ namespace AutoGamepad
                 }
 
                 // REGRA 2: Colunas de Tempo e Jitter (Não podem ser negativos)
-                else if (colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+                else if (colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
                 {
                     if (numericValue < 0)
                     {
@@ -762,14 +927,51 @@ namespace AutoGamepad
                         heldButtons.Add(button); // Segurou, coloca na lista
                     }
                 }
+                // Checagem de lógica: Dar Tap em um botão que está preso
+                else if (action == "Pressionar e Soltar (Tap)")
+                {
+                    if (heldButtons.Contains(button))
+                    {
+                        MarkRowAsError(row, $"Não é possível dar 'Tap' no '{button}', pois ele está travado por um 'Hold' anterior. Use 'Soltar' primeiro!");
+                        isValid = false;
+                    }
+                }
 
-                // Checagem Matemática: Mínimo maior que Máximo
-                int minTime = int.Parse(row.Cells["colMinTime"].Value?.ToString() ?? "0");
-                int maxTime = int.Parse(row.Cells["colMaxTime"].Value?.ToString() ?? "0");
+                // Checagem Matemática: Mínimos maiores que Máximos (Usa TryParse para evitar erro com o tracinho '-')
+                string strMinTime = row.Cells["colMinTime"].Value?.ToString() ?? "0";
+                string strMaxTime = row.Cells["colMaxTime"].Value?.ToString() ?? "0";
+                int minTime = int.TryParse(strMinTime, out int mt) ? mt : 0;
+                int maxTime = int.TryParse(strMaxTime, out int mxt) ? mxt : 0;
+
                 if (minTime > maxTime)
                 {
                     MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
                     isValid = false;
+                }
+
+                string strRampMin = row.Cells["colRampMin"].Value?.ToString() ?? "0";
+                string strRampMax = row.Cells["colRampMax"].Value?.ToString() ?? "0";
+                int rampMin = int.TryParse(strRampMin, out int rm) ? rm : 0;
+                int rampMax = int.TryParse(strRampMax, out int rmx) ? rmx : 0;
+
+                if (rampMin > rampMax)
+                {
+                    MarkRowAsError(row, "A Rampa Mínima não pode ser maior que a Rampa Máxima.");
+                    isValid = false;
+                }
+
+                // Checagem Lógica: Manter eixo em 0%
+                bool isAxisVal = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
+                if (action == "Manter Pressionado (Hold)" && isAxisVal)
+                {
+                    string strValEixo = row.Cells["colValue"].Value?.ToString() ?? "0";
+                    int valEixo = int.TryParse(strValEixo, out int ve) ? ve : 0;
+
+                    if (valEixo == 0)
+                    {
+                        MarkRowAsError(row, "Manter um Eixo em 0% não tem efeito lógico. Use a ação 'Soltar'.");
+                        isValid = false;
+                    }
                 }
             }
 
@@ -786,17 +988,25 @@ namespace AutoGamepad
             return isValid;
         }
 
-        // Pinta a linha de vermelho e coloca um ponto de exclamação
+        // Pinta a linha de vermelho, coloca o ícone e avisa no Log
         private void MarkRowAsError(DataGridViewRow row, string message)
         {
             row.DefaultCellStyle.BackColor = System.Drawing.Color.LightCoral;
             row.ErrorText = message;
+            // Imprime o erro no console preto para o usuário achar fácil!
+            Log($"[ERRO NA LINHA {row.Index + 1}] {message}");
         }
 
         // --- ATIVA/DESATIVA A CHECKBOX DE CICLOS ---
         private void chkLimitCycles_CheckedChanged(object sender, EventArgs e)
         {
             numMaxCycles.Enabled = chkLimitCycles.Checked;
+        }
+
+        private void chkEnableJitter_CheckedChanged(object sender, EventArgs e)
+        {
+            // Ativa ou desativa a caixa de Frequência quando o usuário marca/desmarca o Jitter
+            numJitterFreq.Enabled = chkEnableJitter.Checked;
         }
     }
 }
