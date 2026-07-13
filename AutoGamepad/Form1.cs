@@ -213,7 +213,7 @@ namespace AutoGamepad
                     // 3. Aguarda o tempo estipulado da ação
                     await Task.Delay(waitTime, token);
 
-                    // 4. Se for TAP, precisa soltar o botão automaticamente logo após a pausa!
+                    // 4. Se for TAP, precisa soltar o botão automaticamente logo após a pausa
                     if (action == "Pressionar e Soltar (Tap)")
                     {
                         ProcessHardwareInput(button, 0, false);
@@ -363,8 +363,13 @@ namespace AutoGamepad
             chkLimitCycles.Enabled = isIdle;
             chkSound.Enabled = isIdle;
 
-            // Só libera a caixinha de número se estiver em "Idle" E o Checkbox de limite estiver marcado!
+            // Só libera a caixinha de número se estiver em "Idle" E o Checkbox de limite estiver marcado
             numMaxCycles.Enabled = isIdle && chkLimitCycles.Checked;
+
+            // --- Travas do Jitter Global ---
+            chkEnableJitter.Enabled = isIdle;
+            // Só libera a frequência se estiver em Idle E o checkbox de tremor estiver marcado
+            numJitterFreq.Enabled = isIdle && chkEnableJitter.Checked;
         }
 
         // Escreve na caixa preta e rola pra baixo
@@ -499,24 +504,23 @@ namespace AutoGamepad
         // --- BOTÃO: ADICIONAR LINHA ---
         private void btnRowAdd_Click(object sender, EventArgs e)
         {
-            // Cria uma linha nova e guarda qual é o índice dela
             int rowIndex = gridSequence.Rows.Add();
 
-            // Preenche as caixas de Ação e Botão com valores padrão pra não ficar vazio
             gridSequence.Rows[rowIndex].Cells["colAction"].Value = "Pressionar e Soltar (Tap)";
             gridSequence.Rows[rowIndex].Cells["colButton"].Value = "Botão A";
 
-            // Coloca valores padrão de tempo (100ms) e força (100%)
+            // Coloca valores padrão em tudo pra não ficar vazio
             gridSequence.Rows[rowIndex].Cells["colValue"].Value = "100";
+            gridSequence.Rows[rowIndex].Cells["colRampMin"].Value = "0";
+            gridSequence.Rows[rowIndex].Cells["colRampMax"].Value = "0";
             gridSequence.Rows[rowIndex].Cells["colMinTime"].Value = "100";
             gridSequence.Rows[rowIndex].Cells["colMaxTime"].Value = "100";
             gridSequence.Rows[rowIndex].Cells["colJitter"].Value = "0";
 
-            // Rola a tabela para baixo automaticamente para mostrar a nova linha
             gridSequence.FirstDisplayedScrollingRowIndex = rowIndex;
 
-            // Força a tabela a checar a regra do valor da célula assim que a linha nasce
-            gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
+            // Força a tabela a checar a regra assim que a linha nasce
+            gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colAction"]!.Index, rowIndex));
 
             _sequenceNeedsValidation = true;
         }
@@ -539,52 +543,78 @@ namespace AutoGamepad
             _sequenceNeedsValidation = true;
         }
 
-        // --- DETECTA MUDANÇAS DENTRO DA TABELA ---
+        // --- DETECTA MUDANÇAS DENTRO DA TABELA E BLOQUEIA CÉLULAS ---
         private void gridSequence_CellValueChanged(object sender, DataGridViewCellEventArgs e)
         {
-            // Ignora se o usuário clicou no cabeçalho (linha -1)
             if (e.RowIndex < 0) return;
 
-            // Se a coluna alterada for "Botão/Eixo" (colButton)
-            if (gridSequence.Columns[e.ColumnIndex].Name == "colButton")
+            string colName = gridSequence.Columns[e.ColumnIndex].Name;
+
+            // Se o usuário alterou a Ação ou o Botão, recalcula as travas
+            if (colName == "colAction" || colName == "colButton")
             {
-                var selectedButton = gridSequence.Rows[e.RowIndex].Cells["colButton"].Value?.ToString();
+                var row = gridSequence.Rows[e.RowIndex];
+                string action = row.Cells["colAction"].Value?.ToString() ?? "";
+                string button = row.Cells["colButton"].Value?.ToString() ?? "";
 
-                // Pega duas células: O Valor e o Tremor(Jitter)
-                var valueCell = gridSequence.Rows[e.RowIndex].Cells["colValue"];
-                var jitterCell = gridSequence.Rows[e.RowIndex].Cells["colJitter"];
+                bool isAxis = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
 
-                // Checa com precisão se é um Gatilho ou Movimento de Analógico 
-                // (Ignora D-Pads e os Cliques L3/R3 que começam com outras palavras)
-                bool isAxis = selectedButton != null && (
-                              selectedButton.StartsWith("Gatilho") ||
-                              selectedButton.StartsWith("Analógico"));
+                // Células da linha
+                var cellValue = row.Cells["colValue"];
+                var cellRampMin = row.Cells["colRampMin"];
+                var cellRampMax = row.Cells["colRampMax"];
+                var cellTimeMin = row.Cells["colMinTime"];
+                var cellTimeMax = row.Cells["colMaxTime"];
+                var cellJitter = row.Cells["colJitter"];
 
-                if (isAxis)
+                // Função auxiliar interna para pintar a célula e definir valor padrão
+                void SetCellState(DataGridViewCell cell, bool enabled, string defaultValue = "-")
                 {
-                    // É um eixo de movimento/gatilho. Libera tudo.
-                    valueCell.ReadOnly = false;
-                    valueCell.Style.BackColor = System.Drawing.Color.White;
-                    if (valueCell.Value?.ToString() == "-") valueCell.Value = "100";
-
-                    jitterCell.ReadOnly = false;
-                    jitterCell.Style.BackColor = System.Drawing.Color.White;
-                    if (jitterCell.Value?.ToString() == "-") jitterCell.Value = "0"; // Tremor 0 por padrão
+                    cell.ReadOnly = !enabled;
+                    cell.Style.BackColor = enabled ? System.Drawing.Color.White : System.Drawing.Color.LightGray;
+                    if (!enabled) cell.Value = "-";
+                    else if (cell.Value?.ToString() == "-") cell.Value = defaultValue;
                 }
-                else
-                {
-                    // É um botão normal ou pausa. Bloqueia tudo.
-                    valueCell.ReadOnly = true;
-                    valueCell.Style.BackColor = System.Drawing.Color.LightGray;
-                    valueCell.Value = "-";
 
-                    jitterCell.ReadOnly = true;
-                    jitterCell.Style.BackColor = System.Drawing.Color.LightGray;
-                    jitterCell.Value = "-";
+                // Aplica a lógica física exata para cada tipo de ação
+                if (action.Contains("Pausa"))
+                {
+                    SetCellState(cellValue, false);
+                    SetCellState(cellRampMin, false);
+                    SetCellState(cellRampMax, false);
+                    SetCellState(cellTimeMin, true, "100");
+                    SetCellState(cellTimeMax, true, "100");
+                    SetCellState(cellJitter, false);
+                }
+                else if (action.Contains("Pressionar e Soltar")) // Tap
+                {
+                    SetCellState(cellValue, isAxis, "100");
+                    SetCellState(cellRampMin, isAxis, "0");
+                    SetCellState(cellRampMax, isAxis, "0");
+                    SetCellState(cellTimeMin, true, "100");
+                    SetCellState(cellTimeMax, true, "100");
+                    SetCellState(cellJitter, isAxis, "0");
+                }
+                else if (action.Contains("Manter Pressionado")) // Hold
+                {
+                    SetCellState(cellValue, isAxis, "100");
+                    SetCellState(cellRampMin, isAxis, "0");
+                    SetCellState(cellRampMax, isAxis, "0");
+                    SetCellState(cellTimeMin, false);
+                    SetCellState(cellTimeMax, false);
+                    SetCellState(cellJitter, isAxis, "0");
+                }
+                else if (action.Contains("Soltar")) // Release
+                {
+                    SetCellState(cellValue, false);
+                    SetCellState(cellRampMin, isAxis, "0");
+                    SetCellState(cellRampMax, isAxis, "0");
+                    SetCellState(cellTimeMin, false);
+                    SetCellState(cellTimeMax, false);
+                    SetCellState(cellJitter, false);
                 }
             }
 
-            // Sinaliza o Dirty Flag para o Validador
             _sequenceNeedsValidation = true;
         }
 
@@ -604,7 +634,7 @@ namespace AutoGamepad
                 int colIndex = gridSequence.CurrentCell.ColumnIndex;
                 string colName = gridSequence.Columns[colIndex].Name;
 
-                if (colName == "colValue" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+                if (colName == "colValue" || colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
                 {
                     // Se for, monitora o teclado
                     tb.KeyPress += TextBox_KeyPress;
@@ -628,7 +658,7 @@ namespace AutoGamepad
         {
             string colName = gridSequence.Columns[e.ColumnIndex].Name;
 
-            if (colName == "colValue" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+            if (colName == "colValue" || colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
             {
                 // Pega o valor com segurança contra nulos
                 string newText = e.FormattedValue?.ToString() ?? "";
@@ -654,7 +684,7 @@ namespace AutoGamepad
                 }
 
                 // REGRA 2: Colunas de Tempo e Jitter (Não podem ser negativos)
-                else if (colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
+                else if (colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
                 {
                     if (numericValue < 0)
                     {
@@ -763,13 +793,41 @@ namespace AutoGamepad
                     }
                 }
 
-                // Checagem Matemática: Mínimo maior que Máximo
-                int minTime = int.Parse(row.Cells["colMinTime"].Value?.ToString() ?? "0");
-                int maxTime = int.Parse(row.Cells["colMaxTime"].Value?.ToString() ?? "0");
+                // Checagem Matemática: Mínimos maiores que Máximos (Usa TryParse para evitar erro com o tracinho '-')
+                string strMinTime = row.Cells["colMinTime"].Value?.ToString() ?? "0";
+                string strMaxTime = row.Cells["colMaxTime"].Value?.ToString() ?? "0";
+                int minTime = int.TryParse(strMinTime, out int mt) ? mt : 0;
+                int maxTime = int.TryParse(strMaxTime, out int mxt) ? mxt : 0;
+
                 if (minTime > maxTime)
                 {
                     MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
                     isValid = false;
+                }
+
+                string strRampMin = row.Cells["colRampMin"].Value?.ToString() ?? "0";
+                string strRampMax = row.Cells["colRampMax"].Value?.ToString() ?? "0";
+                int rampMin = int.TryParse(strRampMin, out int rm) ? rm : 0;
+                int rampMax = int.TryParse(strRampMax, out int rmx) ? rmx : 0;
+
+                if (rampMin > rampMax)
+                {
+                    MarkRowAsError(row, "A Rampa Mínima não pode ser maior que a Rampa Máxima.");
+                    isValid = false;
+                }
+
+                // Checagem Lógica: Manter eixo em 0%
+                bool isAxisVal = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
+                if (action == "Manter Pressionado (Hold)" && isAxisVal)
+                {
+                    string strValEixo = row.Cells["colValue"].Value?.ToString() ?? "0";
+                    int valEixo = int.TryParse(strValEixo, out int ve) ? ve : 0;
+
+                    if (valEixo == 0)
+                    {
+                        MarkRowAsError(row, "Manter um Eixo em 0% não tem efeito lógico. Use a ação 'Soltar'.");
+                        isValid = false;
+                    }
                 }
             }
 
@@ -797,6 +855,12 @@ namespace AutoGamepad
         private void chkLimitCycles_CheckedChanged(object sender, EventArgs e)
         {
             numMaxCycles.Enabled = chkLimitCycles.Checked;
+        }
+
+        private void chkEnableJitter_CheckedChanged(object sender, EventArgs e)
+        {
+            // Ativa ou desativa a caixa de Frequência quando o usuário marca/desmarca o Jitter
+            numJitterFreq.Enabled = chkEnableJitter.Checked;
         }
     }
 }
