@@ -40,6 +40,14 @@
             btnRowRemove = new Button();
             btnRowAdd = new Button();
             gridSequence = new DataGridView();
+            colAction = new DataGridViewComboBoxColumn();
+            colButton = new DataGridViewComboBoxColumn();
+            colValue = new DataGridViewTextBoxColumn();
+            colRampMin = new DataGridViewTextBoxColumn();
+            colRampMax = new DataGridViewTextBoxColumn();
+            colMinTime = new DataGridViewTextBoxColumn();
+            colMaxTime = new DataGridViewTextBoxColumn();
+            colJitter = new DataGridViewTextBoxColumn();
             tabPage2 = new TabPage();
             btnJsonValidate = new Button();
             btnJsonPaste = new Button();
@@ -49,14 +57,6 @@
             button2 = new Button();
             chkLimitCycles = new CheckBox();
             numMaxCycles = new NumericUpDown();
-            colAction = new DataGridViewComboBoxColumn();
-            colButton = new DataGridViewComboBoxColumn();
-            colValue = new DataGridViewTextBoxColumn();
-            colRampMin = new DataGridViewTextBoxColumn();
-            colRampMax = new DataGridViewTextBoxColumn();
-            colMinTime = new DataGridViewTextBoxColumn();
-            colMaxTime = new DataGridViewTextBoxColumn();
-            colJitter = new DataGridViewTextBoxColumn();
             chkEnableJitter = new CheckBox();
             numJitterFreq = new NumericUpDown();
             tabEditor.SuspendLayout();
@@ -133,6 +133,7 @@
             tabEditor.SelectedIndex = 0;
             tabEditor.Size = new Size(1186, 377);
             tabEditor.TabIndex = 19;
+            tabEditor.SelectedIndexChanged += tabEditor_SelectedIndexChanged;
             // 
             // tabPage1
             // 
@@ -213,104 +214,6 @@
             gridSequence.CellValueChanged += gridSequence_CellValueChanged;
             gridSequence.EditingControlShowing += gridSequence_EditingControlShowing;
             // 
-            // tabPage2
-            // 
-            tabPage2.Controls.Add(btnJsonValidate);
-            tabPage2.Controls.Add(btnJsonPaste);
-            tabPage2.Controls.Add(btnJsonCopy);
-            tabPage2.Controls.Add(txtJsonCode);
-            tabPage2.Location = new Point(4, 29);
-            tabPage2.Name = "tabPage2";
-            tabPage2.Padding = new Padding(3);
-            tabPage2.Size = new Size(1178, 406);
-            tabPage2.TabIndex = 1;
-            tabPage2.Text = "Código (JSON)";
-            tabPage2.UseVisualStyleBackColor = true;
-            // 
-            // btnJsonValidate
-            // 
-            btnJsonValidate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnJsonValidate.Location = new Point(1053, 104);
-            btnJsonValidate.Name = "btnJsonValidate";
-            btnJsonValidate.Size = new Size(119, 43);
-            btnJsonValidate.TabIndex = 3;
-            btnJsonValidate.Text = "✅ Checar";
-            btnJsonValidate.UseVisualStyleBackColor = true;
-            // 
-            // btnJsonPaste
-            // 
-            btnJsonPaste.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnJsonPaste.Location = new Point(1053, 55);
-            btnJsonPaste.Name = "btnJsonPaste";
-            btnJsonPaste.Size = new Size(119, 43);
-            btnJsonPaste.TabIndex = 2;
-            btnJsonPaste.Text = "📝 Colar";
-            btnJsonPaste.UseVisualStyleBackColor = true;
-            // 
-            // btnJsonCopy
-            // 
-            btnJsonCopy.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnJsonCopy.Location = new Point(1053, 6);
-            btnJsonCopy.Name = "btnJsonCopy";
-            btnJsonCopy.Size = new Size(119, 43);
-            btnJsonCopy.TabIndex = 1;
-            btnJsonCopy.Text = "📋 Copiar";
-            btnJsonCopy.UseVisualStyleBackColor = true;
-            // 
-            // txtJsonCode
-            // 
-            txtJsonCode.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
-            txtJsonCode.BackColor = Color.Black;
-            txtJsonCode.Font = new Font("Consolas", 10.2F, FontStyle.Regular, GraphicsUnit.Point, 0);
-            txtJsonCode.ForeColor = Color.White;
-            txtJsonCode.Location = new Point(6, 6);
-            txtJsonCode.Name = "txtJsonCode";
-            txtJsonCode.Size = new Size(1041, 394);
-            txtJsonCode.TabIndex = 0;
-            txtJsonCode.Text = "";
-            // 
-            // button1
-            // 
-            button1.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            button1.Location = new Point(930, 5);
-            button1.Name = "button1";
-            button1.Size = new Size(119, 43);
-            button1.TabIndex = 20;
-            button1.Text = "💾 Salvar";
-            button1.UseVisualStyleBackColor = true;
-            // 
-            // button2
-            // 
-            button2.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            button2.Location = new Point(1055, 5);
-            button2.Name = "button2";
-            button2.Size = new Size(119, 43);
-            button2.TabIndex = 21;
-            button2.Text = "📂 Carregar";
-            button2.UseVisualStyleBackColor = true;
-            // 
-            // chkLimitCycles
-            // 
-            chkLimitCycles.AutoSize = true;
-            chkLimitCycles.Location = new Point(12, 54);
-            chkLimitCycles.Name = "chkLimitCycles";
-            chkLimitCycles.Size = new Size(123, 24);
-            chkLimitCycles.TabIndex = 22;
-            chkLimitCycles.Text = "Limitar Ciclos:";
-            chkLimitCycles.UseVisualStyleBackColor = true;
-            chkLimitCycles.CheckedChanged += chkLimitCycles_CheckedChanged;
-            // 
-            // numMaxCycles
-            // 
-            numMaxCycles.Enabled = false;
-            numMaxCycles.Location = new Point(190, 53);
-            numMaxCycles.Maximum = new decimal(new int[] { 99999, 0, 0, 0 });
-            numMaxCycles.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
-            numMaxCycles.Name = "numMaxCycles";
-            numMaxCycles.Size = new Size(150, 27);
-            numMaxCycles.TabIndex = 23;
-            numMaxCycles.Value = new decimal(new int[] { 1, 0, 0, 0 });
-            // 
             // colAction
             // 
             colAction.FillWeight = 120F;
@@ -360,6 +263,107 @@
             colJitter.HeaderText = "Tremor Eixo (Jitter)";
             colJitter.MinimumWidth = 6;
             colJitter.Name = "colJitter";
+            // 
+            // tabPage2
+            // 
+            tabPage2.Controls.Add(btnJsonValidate);
+            tabPage2.Controls.Add(btnJsonPaste);
+            tabPage2.Controls.Add(btnJsonCopy);
+            tabPage2.Controls.Add(txtJsonCode);
+            tabPage2.Location = new Point(4, 29);
+            tabPage2.Name = "tabPage2";
+            tabPage2.Padding = new Padding(3);
+            tabPage2.Size = new Size(1178, 344);
+            tabPage2.TabIndex = 1;
+            tabPage2.Text = "Código (JSON)";
+            tabPage2.UseVisualStyleBackColor = true;
+            // 
+            // btnJsonValidate
+            // 
+            btnJsonValidate.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnJsonValidate.Location = new Point(1053, 104);
+            btnJsonValidate.Name = "btnJsonValidate";
+            btnJsonValidate.Size = new Size(119, 43);
+            btnJsonValidate.TabIndex = 3;
+            btnJsonValidate.Text = "✅ Checar";
+            btnJsonValidate.UseVisualStyleBackColor = true;
+            btnJsonValidate.Click += btnJsonValidate_Click;
+            // 
+            // btnJsonPaste
+            // 
+            btnJsonPaste.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnJsonPaste.Location = new Point(1053, 55);
+            btnJsonPaste.Name = "btnJsonPaste";
+            btnJsonPaste.Size = new Size(119, 43);
+            btnJsonPaste.TabIndex = 2;
+            btnJsonPaste.Text = "📝 Colar";
+            btnJsonPaste.UseVisualStyleBackColor = true;
+            btnJsonPaste.Click += btnJsonPaste_Click;
+            // 
+            // btnJsonCopy
+            // 
+            btnJsonCopy.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnJsonCopy.Location = new Point(1053, 6);
+            btnJsonCopy.Name = "btnJsonCopy";
+            btnJsonCopy.Size = new Size(119, 43);
+            btnJsonCopy.TabIndex = 1;
+            btnJsonCopy.Text = "📋 Copiar";
+            btnJsonCopy.UseVisualStyleBackColor = true;
+            btnJsonCopy.Click += btnJsonCopy_Click;
+            // 
+            // txtJsonCode
+            // 
+            txtJsonCode.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            txtJsonCode.BackColor = Color.Black;
+            txtJsonCode.Font = new Font("Consolas", 10.2F, FontStyle.Regular, GraphicsUnit.Point, 0);
+            txtJsonCode.ForeColor = Color.White;
+            txtJsonCode.Location = new Point(6, 6);
+            txtJsonCode.Name = "txtJsonCode";
+            txtJsonCode.Size = new Size(1041, 332);
+            txtJsonCode.TabIndex = 0;
+            txtJsonCode.Text = "";
+            // 
+            // button1
+            // 
+            button1.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            button1.Location = new Point(930, 5);
+            button1.Name = "button1";
+            button1.Size = new Size(119, 43);
+            button1.TabIndex = 20;
+            button1.Text = "💾 Salvar";
+            button1.UseVisualStyleBackColor = true;
+            // 
+            // button2
+            // 
+            button2.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            button2.Location = new Point(1055, 5);
+            button2.Name = "button2";
+            button2.Size = new Size(119, 43);
+            button2.TabIndex = 21;
+            button2.Text = "📂 Carregar";
+            button2.UseVisualStyleBackColor = true;
+            // 
+            // chkLimitCycles
+            // 
+            chkLimitCycles.AutoSize = true;
+            chkLimitCycles.Location = new Point(12, 54);
+            chkLimitCycles.Name = "chkLimitCycles";
+            chkLimitCycles.Size = new Size(123, 24);
+            chkLimitCycles.TabIndex = 22;
+            chkLimitCycles.Text = "Limitar Ciclos:";
+            chkLimitCycles.UseVisualStyleBackColor = true;
+            chkLimitCycles.CheckedChanged += chkLimitCycles_CheckedChanged;
+            // 
+            // numMaxCycles
+            // 
+            numMaxCycles.Enabled = false;
+            numMaxCycles.Location = new Point(190, 53);
+            numMaxCycles.Maximum = new decimal(new int[] { 99999, 0, 0, 0 });
+            numMaxCycles.Minimum = new decimal(new int[] { 1, 0, 0, 0 });
+            numMaxCycles.Name = "numMaxCycles";
+            numMaxCycles.Size = new Size(150, 27);
+            numMaxCycles.TabIndex = 23;
+            numMaxCycles.Value = new decimal(new int[] { 1, 0, 0, 0 });
             // 
             // chkEnableJitter
             // 

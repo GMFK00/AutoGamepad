@@ -2,6 +2,8 @@ using Nefarius.ViGEm.Client;
 using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using System;
+using System.Text.Json;
+using System.Collections.Generic;
 using System.Media;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
@@ -480,6 +482,94 @@ namespace AutoGamepad
                 // Tenta limpar o cliente principal
                 try { _client.Dispose(); } catch { }
                 _client = null;
+            }
+        }
+
+        // --- EXPORTA A TELA PARA UMA STRING JSON ---
+        private string ExportProfileToJson()
+        {
+            // 1. Cria um objeto de perfil vazio e preenche com os "Cabeçalhos" globais
+            var profile = new AutoGamepadProfile
+            {
+                UseCycleLimit = chkLimitCycles.Checked,
+                MaxCycles = (int)numMaxCycles.Value,
+                EnableGlobalJitter = chkEnableJitter.Checked,
+                JitterFrequencyMs = (int)numJitterFreq.Value
+            };
+
+            // 2. Lê linha por linha da tabela e preenche a lista do perfil
+            foreach (DataGridViewRow row in gridSequence.Rows)
+            {
+                if (row.Cells["colAction"].Value == null) continue;
+
+                var step = new SequenceStep
+                {
+                    Action = row.Cells["colAction"].Value?.ToString() ?? "",
+                    Button = row.Cells["colButton"].Value?.ToString() ?? "",
+                    ValuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100,
+                    RampMin = int.TryParse(row.Cells["colRampMin"].Value?.ToString(), out int rMin) ? rMin : 0,
+                    RampMax = int.TryParse(row.Cells["colRampMax"].Value?.ToString(), out int rMax) ? rMax : 0,
+                    WaitMin = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int tMin) ? tMin : 0,
+                    WaitMax = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int tMax) ? tMax : 0,
+                    JitterForce = int.TryParse(row.Cells["colJitter"].Value?.ToString(), out int jf) ? jf : 0
+                };
+
+                profile.Steps.Add(step);
+            }
+
+            // 3. Pede para a biblioteca transformar o objeto num texto JSON formatado e sem bugar os acentos
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            };
+            return JsonSerializer.Serialize(profile, options);
+        }
+
+        // --- IMPORTA UMA STRING JSON PARA A TELA ---
+        private bool ImportProfileFromJson(string jsonText)
+        {
+            try
+            {
+                // 1. Tenta transformar o texto JSON num objeto C#
+                var profile = JsonSerializer.Deserialize<AutoGamepadProfile>(jsonText);
+                if (profile == null) return false;
+
+                // 2. Apaga a tabela inteira atual para não misturar
+                gridSequence.Rows.Clear();
+
+                // 3. Preenche os botões globais
+                chkLimitCycles.Checked = profile.UseCycleLimit;
+                numMaxCycles.Value = Math.Max(numMaxCycles.Minimum, Math.Min(numMaxCycles.Maximum, profile.MaxCycles));
+                chkEnableJitter.Checked = profile.EnableGlobalJitter;
+                numJitterFreq.Value = Math.Max(numJitterFreq.Minimum, Math.Min(numJitterFreq.Maximum, profile.JitterFrequencyMs));
+
+                // 4. Cria e preenche as linhas da tabela
+                foreach (var step in profile.Steps)
+                {
+                    int rowIndex = gridSequence.Rows.Add();
+                    var row = gridSequence.Rows[rowIndex];
+
+                    row.Cells["colAction"].Value = step.Action;
+                    row.Cells["colButton"].Value = step.Button;
+                    row.Cells["colValue"].Value = step.ValuePercent.ToString();
+                    row.Cells["colRampMin"].Value = step.RampMin.ToString();
+                    row.Cells["colRampMax"].Value = step.RampMax.ToString();
+                    row.Cells["colMinTime"].Value = step.WaitMin.ToString();
+                    row.Cells["colMaxTime"].Value = step.WaitMax.ToString();
+                    row.Cells["colJitter"].Value = step.JitterForce.ToString();
+
+                    // Força a UI a atualizar os bloqueios das caixas cinzas dessa nova linha
+                    gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
+                }
+
+                _sequenceNeedsValidation = true;
+                return true;
+            }
+            catch
+            {
+                // Se der erro (ex: o usuário digitou uma vírgula errada no JSON), retorna falso
+                return false;
             }
         }
 
@@ -993,7 +1083,7 @@ namespace AutoGamepad
         {
             row.DefaultCellStyle.BackColor = System.Drawing.Color.LightCoral;
             row.ErrorText = message;
-            // Imprime o erro no console preto para o usuário achar fácil!
+            // Imprime o erro no console preto para o usuário achar fácil
             Log($"[ERRO NA LINHA {row.Index + 1}] {message}");
         }
 
@@ -1008,5 +1098,86 @@ namespace AutoGamepad
             // Ativa ou desativa a caixa de Frequência quando o usuário marca/desmarca o Jitter
             numJitterFreq.Enabled = chkEnableJitter.Checked;
         }
+
+        // --- DETECTA MUDANÇA DE ABA (Tabela <-> Código) ---
+        private void tabEditor_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            // Se o usuário foi para a Aba 1 (Índice 1 = A aba de Código)
+            if (tabEditor.SelectedIndex == 1)
+            {
+                // Verifica se a tabela tem erros matemáticos primeiro
+                if (!ValidateSequence())
+                {
+                    MessageBox.Show("Corrija os erros na tabela antes de visualizar o código.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    tabEditor.SelectedIndex = 0; // Joga ele de volta pra tabela
+                    return;
+                }
+
+                // Tabela OK! Gera o texto JSON e joga na caixa preta
+                txtJsonCode.Text = ExportProfileToJson();
+            }
+        }
+
+        // --- BOTÃO COPIAR ---
+        private void btnJsonCopy_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrWhiteSpace(txtJsonCode.Text))
+            {
+                Clipboard.SetText(txtJsonCode.Text);
+                MessageBox.Show("Código copiado para a área de transferência!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+
+        // --- BOTÃO COLAR ---
+        private void btnJsonPaste_Click(object sender, EventArgs e)
+        {
+            if (Clipboard.ContainsText())
+            {
+                txtJsonCode.Text = Clipboard.GetText();
+            }
+        }
+
+        // --- BOTÃO CHECAR SINTAXE (O Caminho Inverso de Teste) ---
+        private void btnJsonValidate_Click(object sender, EventArgs e)
+        {
+            // Pega o texto da caixa preta e tenta transformar em Tabela de novo
+            bool success = ImportProfileFromJson(txtJsonCode.Text);
+
+            if (success)
+            {
+                MessageBox.Show("Sintaxe JSON Perfeita! A tabela visual foi atualizada.", "Validado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show("Erro de Sintaxe no JSON! Verifique se você não apagou nenhuma vírgula, aspas ou chave '}'. A tabela visual não foi alterada.", "Erro Fatal", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+    }
+
+    // --- MOLDES PARA SALVAR O JSON ---
+
+    // Representa o Perfil Completo (O Arquivo todo)
+    public class AutoGamepadProfile
+    {
+        public bool UseCycleLimit { get; set; }
+        public int MaxCycles { get; set; }
+        public bool EnableGlobalJitter { get; set; }
+        public int JitterFrequencyMs { get; set; }
+
+        // A lista de passos da tabela
+        public List<SequenceStep> Steps { get; set; } = new List<SequenceStep>();
+    }
+
+    // Representa uma única linha da Tabela
+    public class SequenceStep
+    {
+        public string Action { get; set; } = "";
+        public string Button { get; set; } = "";
+        public int ValuePercent { get; set; }
+        public int RampMin { get; set; }
+        public int RampMax { get; set; }
+        public int WaitMin { get; set; }
+        public int WaitMax { get; set; }
+        public int JitterForce { get; set; }
     }
 }
