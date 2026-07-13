@@ -53,8 +53,8 @@
             btnJsonPaste = new Button();
             btnJsonCopy = new Button();
             txtJsonCode = new RichTextBox();
-            button1 = new Button();
-            button2 = new Button();
+            btnSaveProfile = new Button();
+            btnLoadProfile = new Button();
             chkLimitCycles = new CheckBox();
             numMaxCycles = new NumericUpDown();
             chkEnableJitter = new CheckBox();
@@ -323,25 +323,27 @@
             txtJsonCode.TabIndex = 0;
             txtJsonCode.Text = "";
             // 
-            // button1
+            // btnSaveProfile
             // 
-            button1.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            button1.Location = new Point(930, 5);
-            button1.Name = "button1";
-            button1.Size = new Size(119, 43);
-            button1.TabIndex = 20;
-            button1.Text = "💾 Salvar";
-            button1.UseVisualStyleBackColor = true;
+            btnSaveProfile.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnSaveProfile.Location = new Point(930, 5);
+            btnSaveProfile.Name = "btnSaveProfile";
+            btnSaveProfile.Size = new Size(119, 43);
+            btnSaveProfile.TabIndex = 20;
+            btnSaveProfile.Text = "💾 Salvar";
+            btnSaveProfile.UseVisualStyleBackColor = true;
+            btnSaveProfile.Click += btnSaveProfile_Click;
             // 
-            // button2
+            // btnLoadProfile
             // 
-            button2.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            button2.Location = new Point(1055, 5);
-            button2.Name = "button2";
-            button2.Size = new Size(119, 43);
-            button2.TabIndex = 21;
-            button2.Text = "📂 Carregar";
-            button2.UseVisualStyleBackColor = true;
+            btnLoadProfile.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnLoadProfile.Location = new Point(1055, 5);
+            btnLoadProfile.Name = "btnLoadProfile";
+            btnLoadProfile.Size = new Size(119, 43);
+            btnLoadProfile.TabIndex = 21;
+            btnLoadProfile.Text = "📂 Carregar";
+            btnLoadProfile.UseVisualStyleBackColor = true;
+            btnLoadProfile.Click += btnLoadProfile_Click;
             // 
             // chkLimitCycles
             // 
@@ -395,8 +397,8 @@
             Controls.Add(chkEnableJitter);
             Controls.Add(numMaxCycles);
             Controls.Add(chkLimitCycles);
-            Controls.Add(button2);
-            Controls.Add(button1);
+            Controls.Add(btnLoadProfile);
+            Controls.Add(btnSaveProfile);
             Controls.Add(tabEditor);
             Controls.Add(chkSound);
             Controls.Add(chkConnect);
@@ -434,8 +436,8 @@
         private Button btnJsonValidate;
         private Button btnJsonPaste;
         private Button btnJsonCopy;
-        private Button button1;
-        private Button button2;
+        private Button btnSaveProfile;
+        private Button btnLoadProfile;
         private CheckBox chkLimitCycles;
         private NumericUpDown numMaxCycles;
         private DataGridViewComboBoxColumn colAction;
