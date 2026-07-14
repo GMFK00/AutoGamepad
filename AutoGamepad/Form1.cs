@@ -60,6 +60,7 @@ namespace AutoGamepad
         {
             { "[Vazio / Apenas Pausa]", "None" },
             { "Botão A", "A" }, { "Botão B", "B" }, { "Botão X", "X" }, { "Botão Y", "Y" },
+            { "Botão Start", "Start" }, { "Botão Select (Back)", "Back" },
             { "D-Pad Cima", "Up" }, { "D-Pad Baixo", "Down" }, { "D-Pad Esquerda", "Left" }, { "D-Pad Direita", "Right" },
             { "Ombro Esquerdo (LB)", "LB" }, { "Ombro Direito (RB)", "RB" },
             { "Clique Analógico Esq (L3)", "L3" }, { "Clique Analógico Dir (R3)", "R3" },
@@ -424,6 +425,8 @@ namespace AutoGamepad
                 case "Botão B": _controller.SetButtonState(Xbox360Button.B, state); break;
                 case "Botão X": _controller.SetButtonState(Xbox360Button.X, state); break;
                 case "Botão Y": _controller.SetButtonState(Xbox360Button.Y, state); break;
+                case "Botão Start": _controller.SetButtonState(Xbox360Button.Start, state); break;
+                case "Botão Select (Back)": _controller.SetButtonState(Xbox360Button.Back, state); break;
                 case "D-Pad Cima": _controller.SetButtonState(Xbox360Button.Up, state); break;
                 case "D-Pad Baixo": _controller.SetButtonState(Xbox360Button.Down, state); break;
                 case "D-Pad Esquerda": _controller.SetButtonState(Xbox360Button.Left, state); break;
@@ -496,6 +499,8 @@ namespace AutoGamepad
             _controller.SetButtonState(Xbox360Button.B, false);
             _controller.SetButtonState(Xbox360Button.X, false);
             _controller.SetButtonState(Xbox360Button.Y, false);
+            _controller.SetButtonState(Xbox360Button.Start, false);
+            _controller.SetButtonState(Xbox360Button.Back, false);
             _controller.SetButtonState(Xbox360Button.Up, false);
             _controller.SetButtonState(Xbox360Button.Down, false);
             _controller.SetButtonState(Xbox360Button.Left, false);
@@ -841,6 +846,8 @@ namespace AutoGamepad
             buttonColumn.Items.Add("Botão B");
             buttonColumn.Items.Add("Botão X");
             buttonColumn.Items.Add("Botão Y");
+            buttonColumn.Items.Add("Botão Start");
+            buttonColumn.Items.Add("Botão Select (Back)");
             buttonColumn.Items.Add("D-Pad Cima");
             buttonColumn.Items.Add("D-Pad Baixo");
             buttonColumn.Items.Add("D-Pad Esquerda");
