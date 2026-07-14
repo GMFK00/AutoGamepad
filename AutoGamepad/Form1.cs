@@ -32,6 +32,15 @@ namespace AutoGamepad
         private Random _rnd = new Random();
         private bool _sequenceNeedsValidation = true;
 
+        // Variáveis de Gestão de Log Seguro (Anti-Memory Leak)
+        private const int MAX_LOG_LINES_UI = 500; // Máximo de linhas mostradas na tela preta
+        private readonly Queue<string> _logUIBuffer = new Queue<string>(MAX_LOG_LINES_UI);
+
+        private readonly List<string> _logDiskBuffer = new List<string>();
+        private const int MAX_LOG_DISK_BUFFER = 50; // Salva no HD a cada 50 mensagens
+        private string? _currentLogFilePath = null;
+        private readonly object _logLock = new object(); // Trava de segurança para múltiplas Threads
+
         // --- DICIONÁRIOS DE TRADUÇÃO (VISUAL <-> JSON) ---
 
         // Memória do motor físico (Guarda a força atual de cada eixo 0-100%)
@@ -662,14 +671,78 @@ namespace AutoGamepad
             numJitterFreq.Enabled = isIdle && chkEnableJitter.Checked;
         }
 
-        // Escreve na caixa preta e rola pra baixo
+        // --- LOGGER SEGURO (RAM E DISCO) ---
         private void Log(string message)
         {
-            // Checa se a caixa preta não foi destruída (IsDisposed) pelo Windows fechando a janela
-            if (rtbLog != null && !rtbLog.IsDisposed)
+            // Gera o Timestamp com milissegundos
+            string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            string formattedMessage = $"[{timestamp}] {message}";
+
+            // 1. ATUALIZAÇÃO DA TELA PRETA (RAM)
+            // Usa o Invoke para garantir que as Threads assíncronas do Motor Físico não causem crash na UI
+            if (rtbLog != null && !rtbLog.IsDisposed && rtbLog.IsHandleCreated)
             {
-                rtbLog.AppendText(message + Environment.NewLine);
-                rtbLog.ScrollToCaret();
+                rtbLog.Invoke(new Action(() =>
+                {
+                    // Se a fila já tem 500 linhas, joga a mais velha fora
+                    if (_logUIBuffer.Count >= MAX_LOG_LINES_UI)
+                    {
+                        _logUIBuffer.Dequeue();
+                    }
+
+                    _logUIBuffer.Enqueue(formattedMessage);
+
+                    // Pega a fila toda, junta com "Quebra de Linha" e manda pra tela de uma vez
+                    rtbLog.Text = string.Join(Environment.NewLine, _logUIBuffer);
+
+                    // Rola a caixa preta para o final
+                    rtbLog.SelectionStart = rtbLog.Text.Length;
+                    rtbLog.ScrollToCaret();
+                }));
+            }
+
+            // 2. GRAVAÇÃO EM DISCO RÍGIDO (Buffer Batching)
+            // Usamos a trava "lock" porque o C# pode rodar múltiplas coisas ao mesmo tempo e estourar o arquivo
+            lock (_logLock)
+            {
+                // Se o caminho do arquivo ainda não foi criado, cria agora!
+                if (string.IsNullOrEmpty(_currentLogFilePath))
+                {
+                    // Garante que a pasta "Logs" existe na mesma pasta do .exe
+                    string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+                    if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
+
+                    // Cria o nome do arquivo com a data e hora de agora
+                    string dateStr = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                    _currentLogFilePath = Path.Combine(logDir, $"AutoGamepad_{dateStr}.log");
+                }
+
+                _logDiskBuffer.Add(formattedMessage);
+
+                // Se o pacote de mensagens bateu a cota (50 linhas), despeja no HD e limpa o pacote
+                if (_logDiskBuffer.Count >= MAX_LOG_DISK_BUFFER)
+                {
+                    FlushLogToDisk();
+                }
+            }
+        }
+
+        // Função auxiliar que abre o arquivo de texto, insere o pacote e fecha
+        private void FlushLogToDisk()
+        {
+            lock (_logLock)
+            {
+                if (_logDiskBuffer.Count == 0 || string.IsNullOrEmpty(_currentLogFilePath)) return;
+
+                try
+                {
+                    File.AppendAllLines(_currentLogFilePath, _logDiskBuffer);
+                    _logDiskBuffer.Clear(); // Esvazia o buffer da memória RAM
+                }
+                catch
+                {
+                    // Falha silenciosa para não travar a automação caso o antivírus esteja escaneando o arquivo na hora
+                }
             }
         }
 
@@ -703,12 +776,15 @@ namespace AutoGamepad
             ResetControllerState();
             Thread.Sleep(50);
 
-            // 3. Agora sim é seguro desconectar
+            // 3. Agora é seguro desconectar
             DisconnectController();
 
             // Devolve as teclas pro Windows ao fechar o programa
             UnregisterHotKey(this.Handle, HOTKEY_ID_START);
             UnregisterHotKey(this.Handle, HOTKEY_ID_STOP);
+
+            // 4. Salva qualquer mensagem de Log que sobrou perdida na memória!
+            FlushLogToDisk();
 
             base.OnFormClosing(e);
         }
