@@ -1,12 +1,8 @@
-using Nefarius.ViGEm.Client;
-using Nefarius.ViGEm.Client.Targets;
-using Nefarius.ViGEm.Client.Targets.Xbox360;
 using System;
 using System.IO;
 using System.Text.Json;
 using System.Collections.Generic;
 using System.Media;
-using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,22 +10,12 @@ using System.Windows.Forms;
 
 namespace AutoGamepad
 {
-    // Define os tipos de ação possíveis na linha do tempo
-    public enum ActionType
-    {
-        PressAndRelease, // Aperta e solta no final do tempo (Tap)
-        Hold,            // Abaixa o botão/eixo (Rampa se for gatilho)
-        Release,         // Solta o botão/eixo (Rampa de volta se for gatilho)
-        Wait             // Apenas pausa a execução (Não afeta botões)
-    }
-
     public partial class Form1 : Form
     {
         // Variáveis globais do controle e do cancelamento
-        private ViGEmClient? _client;
-        private IXbox360Controller? _controller;
+        private Xbox360GamepadOutput? _gamepadOutput;
         private CancellationTokenSource? _cancellationTokenSource;
-        private Random _rnd = new Random();
+        private Task? _automationTask;
         private bool _sequenceNeedsValidation = true;
 
         // Variáveis de Gestão de Log Seguro (Anti-Memory Leak)
@@ -42,9 +28,6 @@ namespace AutoGamepad
         private readonly object _logLock = new object(); // Trava de segurança para múltiplas Threads
 
         // --- DICIONÁRIOS DE TRADUÇÃO (VISUAL <-> JSON) ---
-
-        // Memória do motor físico (Guarda a força atual de cada eixo 0-100%)
-        private System.Collections.Generic.Dictionary<string, float> _axisStates = new();
 
         // Traduz Ações (Tabela -> JSON)
         private readonly Dictionary<string, string> _actionToJson = new()
@@ -139,7 +122,6 @@ namespace AutoGamepad
         // --- BOTÃO INICIAR ---
         private async void btnStart_Click(object sender, EventArgs e)
         {
-
             if (_sequenceNeedsValidation)
             {
                 if (!ValidateSequence())
@@ -152,28 +134,35 @@ namespace AutoGamepad
             }
 
             // Trava de Segurança: Obriga a conectar antes de dar Start
-            if (!chkConnect.Checked || _controller == null)
+            if (!chkConnect.Checked || _gamepadOutput == null)
             {
                 MessageBox.Show("Você precisa conectar o controle virtual primeiro (Botão no topo).", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
+            AutomationProgram program = CreateAutomationProgram();
+            Xbox360GamepadOutput output = _gamepadOutput;
+
             // Trava os botões para o usuário não clicar duas vezes
             ToggleUI(false);
-            rtbLog.Clear();
+            ClearVisualLog();
             Log("=====================================");
             Log(" INICIANDO AUTOMAÇÃO AUTOGAMEPAD");
             Log("=====================================");
 
             // Cria o token que permite interromper a automação a qualquer momento
-            _cancellationTokenSource = new CancellationTokenSource();
+            var cancellationSource = new CancellationTokenSource();
+            _cancellationTokenSource = cancellationSource;
 
             try
             {
-                PlaySound(true); // TOCA O SOM DE INÍCIO
+                ResetControllerState();
+                PlaySound(true);
 
-                // Inicia o motor principal
-                await RunAutomationAsync(_cancellationTokenSource.Token);
+                // O motor recebe somente um snapshot imutável e não acessa controles WinForms.
+                var engine = new AutomationEngine(output, Log);
+                _automationTask = Task.Run(() => engine.RunAsync(program, cancellationSource.Token), cancellationSource.Token);
+                await _automationTask;
             }
             catch (OperationCanceledException)
             {
@@ -185,9 +174,16 @@ namespace AutoGamepad
             }
             finally
             {
-                PlaySound(false); // TOCA O SOM DE FIM (Toca mesmo se der erro ou cancelar)
+                // Garante ponto morto em término normal, cancelamento ou falha do motor.
+                TryResetControllerState();
+                PlaySound(false);
 
-                // Limpa apenas a UI
+                _automationTask = null;
+                if (ReferenceEquals(_cancellationTokenSource, cancellationSource))
+                {
+                    _cancellationTokenSource = null;
+                }
+                cancellationSource.Dispose();
                 ToggleUI(true);
                 Log("Ciclo de automação finalizado.");
             }
@@ -200,344 +196,90 @@ namespace AutoGamepad
             _cancellationTokenSource?.Cancel(); // Avisa o loop para abortar
         }
 
-        // --- A AUTOMAÇÃO ---
-        private async Task RunAutomationAsync(CancellationToken token)
-        {
-            // Coloca o controle em "Ponto Morto"
-            ResetControllerState();
-
-            bool useLimit = chkLimitCycles.Checked;
-            int maxCycles = (int)numMaxCycles.Value;
-
-            Log("Iniciando execução da tabela de sequências...");
-
-            int loopCount = 1;
-            while (!token.IsCancellationRequested)
-            {
-                if (useLimit && loopCount > maxCycles)
-                {
-                    Log($"\n[INFO] Limite de {maxCycles} ciclos atingido. Finalizando com sucesso.");
-                    break;
-                }
-
-                Log($"\n=== Iniciando Ciclo {loopCount} ===");
-
-                for (int i = 0; i < gridSequence.Rows.Count; i++)
-                {
-                    if (token.IsCancellationRequested) break;
-
-                    var row = gridSequence.Rows[i];
-                    if (row.Cells["colAction"].Value == null) continue;
-
-                    string action = row.Cells["colAction"].Value?.ToString() ?? "";
-                    string button = row.Cells["colButton"].Value?.ToString() ?? "";
-
-                    // Converte os textos com segurança
-                    int valuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100;
-                    int rampMin = int.TryParse(row.Cells["colRampMin"].Value?.ToString(), out int rMin) ? rMin : 0;
-                    int rampMax = int.TryParse(row.Cells["colRampMax"].Value?.ToString(), out int rMax) ? rMax : 0;
-                    int timeMin = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int tMin) ? tMin : 0;
-                    int timeMax = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int tMax) ? tMax : 0;
-                    int jitterForce = int.TryParse(row.Cells["colJitter"].Value?.ToString(), out int jF) ? jF : 0;
-
-                    // Sorteia os Tempos (O Jitter Temporal)
-                    int rampTime = _rnd.Next(rampMin, rampMax + 1);
-                    int actionTime = _rnd.Next(timeMin, timeMax + 1);
-
-                    bool isAxis = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
-
-                    // Log super detalhado da ação que está acontecendo
-                    if (action.Contains("Pausa"))
-                    {
-                        Log($"[Linha {i + 1}] ⏳ PAUSA | Duração: {actionTime}ms");
-                    }
-                    else if (isAxis)
-                    {
-                        Log($"[Linha {i + 1}] 🎮 {action} [{button}] -> Alvo: {valuePercent}% | Rampa: {rampTime}ms | Platô: {actionTime}ms | Jitter: ±{jitterForce}%");
-                    }
-                    else
-                    {
-                        Log($"[Linha {i + 1}] 🔘 {action} [{button}] -> Duração: {actionTime}ms");
-                    }
-
-                    // 1. PAUSA GERAL
-                    if (action.Contains("Pausa"))
-                    {
-                        await Task.Delay(actionTime, token);
-                        continue;
-                    }
-
-                    // 2. AÇÕES PARA EIXOS / GATILHOS (Usa o Motor Físico)
-                    if (isAxis)
-                    {
-                        if (action.Contains("Pressionar e Soltar")) // Tap
-                        {
-                            // Sobe a rampa, segura pelo tempo tremendo, e depois desce a rampa de volta a zero
-                            await ExecuteAxisActionAsync(button, valuePercent, rampTime, actionTime, jitterForce, token);
-                            await ExecuteAxisActionAsync(button, 0, rampTime, 0, 0, token);
-                        }
-                        else if (action.Contains("Manter Pressionado")) // Hold
-                        {
-                            // Apenas sobe a rampa até o valor e abandona lá (Hold não tem tempo de pausa)
-                            await ExecuteAxisActionAsync(button, valuePercent, rampTime, 0, jitterForce, token);
-                        }
-                        else if (action.Contains("Soltar")) // Release
-                        {
-                            // Desce a rampa suavemente até 0
-                            await ExecuteAxisActionAsync(button, 0, rampTime, 0, 0, token);
-                        }
-                    }
-                    // 3. AÇÕES PARA BOTÕES DIGITAIS (Instantanêo)
-                    else
-                    {
-                        if (action.Contains("Pressionar e Soltar"))
-                        {
-                            ProcessHardwareInput(button, 100, true);
-                            await Task.Delay(actionTime, token);
-                            ProcessHardwareInput(button, 0, false);
-                        }
-                        else if (action.Contains("Manter Pressionado"))
-                        {
-                            ProcessHardwareInput(button, 100, true);
-                        }
-                        else if (action.Contains("Soltar"))
-                        {
-                            ProcessHardwareInput(button, 0, false);
-                        }
-                    }
-                }
-                loopCount++;
-            }
-        }
-
-        // --- MOTOR FÍSICO: EXECUTA RAMPAS E JITTER EM EIXOS (60 FPS) ---
-        private async Task ExecuteAxisActionAsync(string buttonName, int targetValuePercent, int rampTime, int holdTime, int jitterForce, CancellationToken token)
-        {
-            // Descobre de onde estamos partindo na memória
-            if (!_axisStates.ContainsKey(buttonName)) _axisStates[buttonName] = 0f;
-            float startValue = _axisStates[buttonName];
-
-            bool useJitter = chkEnableJitter.Checked && jitterForce > 0;
-            int jitterFreq = (int)numJitterFreq.Value;
-
-            // FAST-PATH: Se não tem rampa e não tem Jitter, vai instantâneo. (Poupa CPU)
-            if (rampTime == 0 && !useJitter)
-            {
-                ProcessHardwareInput(buttonName, targetValuePercent, true);
-                _axisStates[buttonName] = targetValuePercent;
-                if (holdTime > 0) await Task.Delay(holdTime, token);
-                return;
-            }
-
-            // ADVANCED-PATH: O Game Loop de 60Hz (~16ms por frame)
-            const int frameDelay = 16;
-            int currentJitter = 0;
-            int timeSinceLastJitter = jitterFreq;
-
-            // FASE 1: A RAMPA
-            if (rampTime > 0)
-            {
-                int elapsedTime = 0;
-                while (elapsedTime < rampTime)
-                {
-                    if (token.IsCancellationRequested) return;
-
-                    // Interpolação Linear (Lerp): Acha o valor exato na curva de subida
-                    float progress = (float)elapsedTime / rampTime;
-                    float currentValue = startValue + (targetValuePercent - startValue) * progress;
-
-                    // Calcula o Tremor Físico
-                    if (useJitter)
-                    {
-                        timeSinceLastJitter += frameDelay;
-                        if (timeSinceLastJitter >= jitterFreq)
-                        {
-                            currentJitter = _rnd.Next(-jitterForce, jitterForce + 1);
-                            timeSinceLastJitter = 0;
-                        }
-                    }
-
-                    // Grampeia (Clamp) pra não estourar os limites de 0 a 100%
-                    int finalValue = (int)Math.Max(0, Math.Min(100, currentValue + currentJitter));
-
-                    ProcessHardwareInput(buttonName, finalValue, true);
-
-                    await Task.Delay(frameDelay, token);
-                    elapsedTime += frameDelay;
-                }
-            }
-
-            // Fim da rampa: Salva o alvo na memória para o próximo movimento começar daqui
-            _axisStates[buttonName] = targetValuePercent;
-            ProcessHardwareInput(buttonName, targetValuePercent, true);
-
-            // FASE 2: O PLATÔ (Segurar o botão por X milissegundos)
-            if (holdTime > 0)
-            {
-                if (useJitter) // Se tiver jitter, continua tremendo enquanto segura
-                {
-                    int elapsedTime = 0;
-                    timeSinceLastJitter = jitterFreq; // Reseta
-
-                    while (elapsedTime < holdTime)
-                    {
-                        if (token.IsCancellationRequested) return;
-
-                        timeSinceLastJitter += frameDelay;
-                        if (timeSinceLastJitter >= jitterFreq)
-                        {
-                            currentJitter = _rnd.Next(-jitterForce, jitterForce + 1);
-                            timeSinceLastJitter = 0;
-
-                            int finalValue = (int)Math.Max(0, Math.Min(100, targetValuePercent + currentJitter));
-                            ProcessHardwareInput(buttonName, finalValue, true);
-                        }
-
-                        await Task.Delay(frameDelay, token);
-                        elapsedTime += frameDelay;
-                    }
-
-                    // Terminou de segurar, devolve pro valor base cravado
-                    ProcessHardwareInput(buttonName, targetValuePercent, true);
-                }
-                else
-                {
-                    // Sem jitter no platô? Dá um Delay direto pra poupar o processador!
-                    await Task.Delay(holdTime, token);
-                }
-            }
-        }
-
-        // --- FUNÇÕES AUXILIARES ---
-
-        // --- TRADUTOR: CONVERTE TEXTO DA TABELA EM SINAL ---
-        private void ProcessHardwareInput(string buttonName, int valuePercent, bool isPress)
-        {
-            if (_controller == null) return;
-
-            // Para botões digitais, o estado é True (Apertar) ou False (Soltar)
-            bool state = isPress;
-
-            switch (buttonName)
-            {
-                // BOTÕES DIGITAIS
-                case "Botão A": _controller.SetButtonState(Xbox360Button.A, state); break;
-                case "Botão B": _controller.SetButtonState(Xbox360Button.B, state); break;
-                case "Botão X": _controller.SetButtonState(Xbox360Button.X, state); break;
-                case "Botão Y": _controller.SetButtonState(Xbox360Button.Y, state); break;
-                case "Botão Start": _controller.SetButtonState(Xbox360Button.Start, state); break;
-                case "Botão Select (Back)": _controller.SetButtonState(Xbox360Button.Back, state); break;
-                case "D-Pad Cima": _controller.SetButtonState(Xbox360Button.Up, state); break;
-                case "D-Pad Baixo": _controller.SetButtonState(Xbox360Button.Down, state); break;
-                case "D-Pad Esquerda": _controller.SetButtonState(Xbox360Button.Left, state); break;
-                case "D-Pad Direita": _controller.SetButtonState(Xbox360Button.Right, state); break;
-                case "Ombro Esquerdo (LB)": _controller.SetButtonState(Xbox360Button.LeftShoulder, state); break;
-                case "Ombro Direito (RB)": _controller.SetButtonState(Xbox360Button.RightShoulder, state); break;
-                case "Clique Analógico Esq (L3)": _controller.SetButtonState(Xbox360Button.LeftThumb, state); break;
-                case "Clique Analógico Dir (R3)": _controller.SetButtonState(Xbox360Button.RightThumb, state); break;
-
-                // GATILHOS (Convertendo 0-100% para 0-255 Byte)
-                case "Gatilho Esquerdo (LT)":
-                    byte ltValue = isPress ? (byte)(valuePercent * 255 / 100) : (byte)0;
-                    _controller.SetSliderValue(Xbox360Slider.LeftTrigger, ltValue);
-                    break;
-                case "Gatilho Direito (RT)":
-                    byte rtValue = isPress ? (byte)(valuePercent * 255 / 100) : (byte)0;
-                    _controller.SetSliderValue(Xbox360Slider.RightTrigger, rtValue);
-                    break;
-
-                // ANALÓGICOS (Convertendo 0-100% para 0-32767 Short)
-                // Cima/Direita = Valores Positivos | Baixo/Esquerda = Valores Negativos
-                case "Analógico Esq - Cima":
-                    short lsUp = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.LeftThumbY, lsUp);
-                    break;
-                case "Analógico Esq - Baixo":
-                    short lsDown = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.LeftThumbY, lsDown);
-                    break;
-                case "Analógico Esq - Direita":
-                    short lsRight = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.LeftThumbX, lsRight);
-                    break;
-                case "Analógico Esq - Esquerda":
-                    short lsLeft = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.LeftThumbX, lsLeft);
-                    break;
-
-                // Mesmo para o Analógico Direito...
-                case "Analógico Dir - Cima":
-                    short rsUp = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.RightThumbY, rsUp);
-                    break;
-                case "Analógico Dir - Baixo":
-                    short rsDown = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.RightThumbY, rsDown);
-                    break;
-                case "Analógico Dir - Direita":
-                    short rsRight = isPress ? (short)(valuePercent * 32767 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.RightThumbX, rsRight);
-                    break;
-                case "Analógico Dir - Esquerda":
-                    short rsLeft = isPress ? (short)(valuePercent * -32768 / 100) : (short)0;
-                    _controller.SetAxisValue(Xbox360Axis.RightThumbX, rsLeft);
-                    break;
-            }
-        }
-
         // --- ZERA O CONTROLE (PONTO MORTO) ---
         // Solta todos os botões e zera os eixos sem precisar desconectar o USB
         private void ResetControllerState()
         {
-            if (_controller == null) return;
+            _gamepadOutput?.Reset();
+        }
 
-            // Zera a memória matemática do Motor Físico
-            _axisStates.Clear();
-
-            // Zera Botões Digitais
-            _controller.SetButtonState(Xbox360Button.A, false);
-            _controller.SetButtonState(Xbox360Button.B, false);
-            _controller.SetButtonState(Xbox360Button.X, false);
-            _controller.SetButtonState(Xbox360Button.Y, false);
-            _controller.SetButtonState(Xbox360Button.Start, false);
-            _controller.SetButtonState(Xbox360Button.Back, false);
-            _controller.SetButtonState(Xbox360Button.Up, false);
-            _controller.SetButtonState(Xbox360Button.Down, false);
-            _controller.SetButtonState(Xbox360Button.Left, false);
-            _controller.SetButtonState(Xbox360Button.Right, false);
-            _controller.SetButtonState(Xbox360Button.LeftShoulder, false);
-            _controller.SetButtonState(Xbox360Button.RightShoulder, false);
-            _controller.SetButtonState(Xbox360Button.LeftThumb, false);
-            _controller.SetButtonState(Xbox360Button.RightThumb, false);
-
-            // Zera Gatilhos (0)
-            _controller.SetSliderValue(Xbox360Slider.LeftTrigger, 0);
-            _controller.SetSliderValue(Xbox360Slider.RightTrigger, 0);
-
-            // Zera Analógicos (Centro = 0)
-            _controller.SetAxisValue(Xbox360Axis.LeftThumbX, 0);
-            _controller.SetAxisValue(Xbox360Axis.LeftThumbY, 0);
-            _controller.SetAxisValue(Xbox360Axis.RightThumbX, 0);
-            _controller.SetAxisValue(Xbox360Axis.RightThumbY, 0);
+        private void TryResetControllerState()
+        {
+            try
+            {
+                ResetControllerState();
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERRO] Não foi possível neutralizar o controle: {ex.Message}");
+            }
         }
 
 
         // --- DESCONECTA E LIMPA A MEMÓRIA ---
         private void DisconnectController()
         {
-            if (_controller != null)
+            _gamepadOutput?.Dispose();
+            _gamepadOutput = null;
+        }
+
+        // Converte o estado atual da UI em dados imutáveis antes de iniciar o motor.
+        private AutomationProgram CreateAutomationProgram()
+        {
+            var steps = new List<AutomationStep>();
+
+            foreach (DataGridViewRow row in gridSequence.Rows)
             {
-                // Tenta desconectar. Se o Windows já tiver matado o objeto, ignora o erro silenciosamente.
-                try { _controller.Disconnect(); } catch { }
-                _controller = null;
+                if (row.Cells["colAction"].Value == null)
+                {
+                    continue;
+                }
+
+                string actionLabel = row.Cells["colAction"].Value?.ToString() ?? "";
+                string controlLabel = row.Cells["colButton"].Value?.ToString() ?? "";
+                string controlJsonId = _buttonToJson.GetValueOrDefault(controlLabel, "None");
+
+                steps.Add(new AutomationStep(
+                    ParseAction(actionLabel),
+                    actionLabel,
+                    GamepadControlCatalog.FromJsonId(controlJsonId),
+                    controlLabel,
+                    ParseCell(row, "colValue", 100),
+                    ParseCell(row, "colRampMin", 0),
+                    ParseCell(row, "colRampMax", 0),
+                    ParseCell(row, "colMinTime", 0),
+                    ParseCell(row, "colMaxTime", 0),
+                    ParseCell(row, "colJitter", 0)));
             }
 
-            if (_client != null)
+            return new AutomationProgram(
+                chkLimitCycles.Checked,
+                (int)numMaxCycles.Value,
+                chkEnableJitter.Checked,
+                (int)numJitterFreq.Value,
+                steps.AsReadOnly());
+        }
+
+        private static ActionType ParseAction(string actionLabel)
+        {
+            return actionLabel switch
             {
-                // Tenta limpar o cliente principal
-                try { _client.Dispose(); } catch { }
-                _client = null;
-            }
+                "Pressionar e Soltar (Tap)" => ActionType.PressAndRelease,
+                "Manter Pressionado (Hold)" => ActionType.Hold,
+                "Soltar Botão/Eixo (Release)" => ActionType.Release,
+                _ => ActionType.Wait
+            };
+        }
+
+        private static int ParseCell(DataGridViewRow row, string columnName, int fallback)
+        {
+            return int.TryParse(row.Cells[columnName].Value?.ToString(), out int value) ? value : fallback;
+        }
+
+        private GamepadControl GetGamepadControl(string controlLabel)
+        {
+            string jsonId = _buttonToJson.GetValueOrDefault(controlLabel, "None");
+            return GamepadControlCatalog.FromJsonId(jsonId);
         }
 
         // --- EXPORTA A TELA PARA UMA STRING JSON ---
@@ -662,6 +404,16 @@ namespace AutoGamepad
             // Travas da Tabela e do Editor JSON
             gridSequence.Enabled = isIdle;
             txtJsonCode.Enabled = isIdle;
+            tabEditor.Enabled = isIdle;
+            btnRowAdd.Enabled = isIdle;
+            btnRowRemove.Enabled = isIdle;
+            btnRowUp.Enabled = isIdle;
+            btnRowDown.Enabled = isIdle;
+            btnJsonPaste.Enabled = isIdle;
+            btnJsonValidate.Enabled = isIdle;
+            btnJsonCopy.Enabled = isIdle;
+            btnSaveProfile.Enabled = isIdle;
+            btnLoadProfile.Enabled = isIdle;
 
             // Travas de Ciclo e Som
             chkLimitCycles.Enabled = isIdle;
@@ -676,6 +428,12 @@ namespace AutoGamepad
             numJitterFreq.Enabled = isIdle && chkEnableJitter.Checked;
         }
 
+        private void ClearVisualLog()
+        {
+            _logUIBuffer.Clear();
+            rtbLog.Clear();
+        }
+
         // --- LOGGER SEGURO (RAM E DISCO) ---
         private void Log(string message)
         {
@@ -687,47 +445,74 @@ namespace AutoGamepad
             // Usa o Invoke para garantir que as Threads assíncronas do Motor Físico não causem crash na UI
             if (rtbLog != null && !rtbLog.IsDisposed && rtbLog.IsHandleCreated)
             {
-                rtbLog.Invoke(new Action(() =>
+                try
                 {
-                    // Se a fila já tem 500 linhas, joga a mais velha fora
-                    if (_logUIBuffer.Count >= MAX_LOG_LINES_UI)
+                    void AppendToVisualLog()
                     {
-                        _logUIBuffer.Dequeue();
+                        // Se a fila já tem 500 linhas, joga a mais velha fora
+                        if (_logUIBuffer.Count >= MAX_LOG_LINES_UI)
+                        {
+                            _logUIBuffer.Dequeue();
+                        }
+
+                        _logUIBuffer.Enqueue(formattedMessage);
+
+                        // Pega a fila toda, junta com "Quebra de Linha" e manda pra tela de uma vez
+                        rtbLog.Text = string.Join(Environment.NewLine, _logUIBuffer);
+
+                        // Rola a caixa preta para o final
+                        rtbLog.SelectionStart = rtbLog.Text.Length;
+                        rtbLog.ScrollToCaret();
                     }
 
-                    _logUIBuffer.Enqueue(formattedMessage);
-
-                    // Pega a fila toda, junta com "Quebra de Linha" e manda pra tela de uma vez
-                    rtbLog.Text = string.Join(Environment.NewLine, _logUIBuffer);
-
-                    // Rola a caixa preta para o final
-                    rtbLog.SelectionStart = rtbLog.Text.Length;
-                    rtbLog.ScrollToCaret();
-                }));
+                    if (rtbLog.InvokeRequired)
+                    {
+                        rtbLog.Invoke((Action)AppendToVisualLog);
+                    }
+                    else
+                    {
+                        AppendToVisualLog();
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // A janela pode estar destruindo o handle durante o encerramento.
+                }
             }
 
             // 2. GRAVAÇÃO EM DISCO RÍGIDO (Buffer Batching)
             // Usamos a trava "lock" porque o C# pode rodar múltiplas coisas ao mesmo tempo e estourar o arquivo
             lock (_logLock)
             {
-                // Se o caminho do arquivo ainda não foi criado, cria agora!
-                if (string.IsNullOrEmpty(_currentLogFilePath))
+                try
                 {
-                    // Garante que a pasta "Logs" existe na mesma pasta do .exe
-                    string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
-                    if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
+                    // Se o caminho do arquivo ainda não foi criado, cria agora!
+                    if (string.IsNullOrEmpty(_currentLogFilePath))
+                    {
+                        // Garante que a pasta "Logs" existe na mesma pasta do .exe
+                        string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
+                        if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
 
-                    // Cria o nome do arquivo com a data e hora de agora
-                    string dateStr = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                    _currentLogFilePath = Path.Combine(logDir, $"AutoGamepad_{dateStr}.log");
+                        // Cria o nome do arquivo com a data e hora de agora
+                        string dateStr = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+                        _currentLogFilePath = Path.Combine(logDir, $"AutoGamepad_{dateStr}.log");
+                    }
+
+                    _logDiskBuffer.Add(formattedMessage);
+
+                    // Se o pacote de mensagens bateu a cota (50 linhas), despeja no HD e limpa o pacote
+                    if (_logDiskBuffer.Count >= MAX_LOG_DISK_BUFFER)
+                    {
+                        FlushLogToDisk();
+                    }
                 }
-
-                _logDiskBuffer.Add(formattedMessage);
-
-                // Se o pacote de mensagens bateu a cota (50 linhas), despeja no HD e limpa o pacote
-                if (_logDiskBuffer.Count >= MAX_LOG_DISK_BUFFER)
+                catch (IOException)
                 {
-                    FlushLogToDisk();
+                    // O log não pode interromper o motor.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // O diretório do executável pode não permitir escrita.
                 }
             }
         }
@@ -774,21 +559,16 @@ namespace AutoGamepad
         // Evento que ocorre quando o usuário clica no "X" para fechar a janela
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            // 1. Manda o sinal de abortar pro Motor da automação parar IMEDIATAMENTE
+            // Cancela o motor antes de neutralizar e desconectar o dispositivo.
             _cancellationTokenSource?.Cancel();
-
-            // 2. Coloca o controle em ponto morto e espera 50ms pro Motor finalizar
-            ResetControllerState();
-            Thread.Sleep(50);
-
-            // 3. Agora é seguro desconectar
+            TryResetControllerState();
             DisconnectController();
 
             // Devolve as teclas pro Windows ao fechar o programa
             UnregisterHotKey(this.Handle, HOTKEY_ID_START);
             UnregisterHotKey(this.Handle, HOTKEY_ID_STOP);
 
-            // 4. Salva qualquer mensagem de Log que sobrou perdida na memória!
+            // Salva qualquer mensagem de Log que sobrou perdida na memória.
             FlushLogToDisk();
 
             base.OnFormClosing(e);
@@ -802,9 +582,7 @@ namespace AutoGamepad
                 try
                 {
                     Log("Iniciando driver do controle virtual...");
-                    _client = new ViGEmClient();
-                    _controller = _client.CreateXbox360Controller();
-                    _controller.Connect();
+                    _gamepadOutput = Xbox360GamepadOutput.Connect();
 
                     chkConnect.Text = "✅ Controle Conectado";
                     Log("[SUCESSO] Controle de Xbox conectado no Windows.");
@@ -1124,15 +902,21 @@ namespace AutoGamepad
         private bool ValidateSequence()
         {
             bool isValid = true;
-
-            // Lista do C# para salvar quais botões estão segurados na linha do tempo
-            var heldButtons = new System.Collections.Generic.HashSet<string>();
+            var heldControls = new HashSet<GamepadControl>();
+            var heldControlLabels = new Dictionary<GamepadControl, string>();
+            var heldAxisChannels = new Dictionary<AxisChannel, (GamepadControl Control, string Label)>();
 
             // Limpa as cores vermelhas antigas da tabela antes de checar de novo
             foreach (DataGridViewRow row in gridSequence.Rows)
             {
                 row.DefaultCellStyle.BackColor = System.Drawing.Color.White;
                 row.ErrorText = ""; // Remove o ícone de erro
+            }
+
+            if (gridSequence.Rows.Count == 0)
+            {
+                Log("[ERRO] A sequência está vazia. Adicione pelo menos uma etapa antes de iniciar.");
+                return false;
             }
 
             // Lê linha por linha do começo ao fim
@@ -1143,52 +927,81 @@ namespace AutoGamepad
 
                 string action = row.Cells["colAction"].Value?.ToString() ?? "";
                 string button = row.Cells["colButton"].Value?.ToString() ?? "";
+                ActionType actionType = ParseAction(action);
+                GamepadControl control = GetGamepadControl(button);
+                bool isAxis = GamepadControlCatalog.TryGetAxisBinding(control, out AxisBinding axisBinding);
 
                 // Checagem de lógica: Soltar um botão que não está pressionado
-                if (action == "Soltar Botão/Eixo (Release)")
+                if (actionType == ActionType.Release)
                 {
-                    if (!heldButtons.Contains(button))
+                    if (!heldControls.Contains(control))
                     {
                         MarkRowAsError(row, $"Tentando soltar '{button}', mas ele não foi mantido pressionado anteriormente!");
                         isValid = false;
                     }
                     else
                     {
-                        heldButtons.Remove(button); // Soltou, tira da lista
+                        heldControls.Remove(control);
+                        heldControlLabels.Remove(control);
+
+                        if (isAxis
+                            && heldAxisChannels.TryGetValue(axisBinding.Channel, out var heldAxis)
+                            && heldAxis.Control == control)
+                        {
+                            heldAxisChannels.Remove(axisBinding.Channel);
+                        }
                     }
                 }
 
                 // Checagem de lógica: Segurar um botão
-                else if (action == "Manter Pressionado (Hold)")
+                else if (actionType == ActionType.Hold)
                 {
-                    if (heldButtons.Contains(button))
+                    if (heldControls.Contains(control))
                     {
                         MarkRowAsError(row, $"O botão '{button}' já está sendo segurado!");
                         isValid = false;
                     }
+                    else if (isAxis && heldAxisChannels.TryGetValue(axisBinding.Channel, out var heldAxis))
+                    {
+                        MarkRowAsError(row, $"O eixo físico de '{button}' já está sendo controlado por '{heldAxis.Label}'. Solte a direção anterior primeiro!");
+                        isValid = false;
+                    }
                     else
                     {
-                        heldButtons.Add(button); // Segurou, coloca na lista
+                        heldControls.Add(control);
+                        heldControlLabels[control] = button;
+
+                        if (isAxis)
+                        {
+                            heldAxisChannels[axisBinding.Channel] = (control, button);
+                        }
                     }
                 }
                 // Checagem de lógica: Dar Tap em um botão que está preso
-                else if (action == "Pressionar e Soltar (Tap)")
+                else if (actionType == ActionType.PressAndRelease)
                 {
-                    if (heldButtons.Contains(button))
+                    if (heldControls.Contains(control))
                     {
                         MarkRowAsError(row, $"Não é possível dar 'Tap' no '{button}', pois ele está travado por um 'Hold' anterior. Use 'Soltar' primeiro!");
                         isValid = false;
                     }
+                    else if (isAxis && heldAxisChannels.TryGetValue(axisBinding.Channel, out var heldAxis))
+                    {
+                        MarkRowAsError(row, $"Não é possível mover '{button}' enquanto '{heldAxis.Label}' mantém o mesmo eixo físico pressionado.");
+                        isValid = false;
+                    }
                 }
 
-                // Checagem Matemática de Tempos e Rampas (TryParse evita erro com o tracinho '-')
-                string strMinTime = row.Cells["colMinTime"].Value?.ToString() ?? "0";
-                string strMaxTime = row.Cells["colMaxTime"].Value?.ToString() ?? "0";
-                int minTime = int.TryParse(strMinTime, out int mt) ? mt : 0;
-                int maxTime = int.TryParse(strMaxTime, out int mxt) ? mxt : 0;
+                // O traço representa uma célula desabilitada. Qualquer outro texto precisa caber em Int32.
+                bool validMinTime = TryReadNumericCell(row, "colMinTime", out int minTime);
+                bool validMaxTime = TryReadNumericCell(row, "colMaxTime", out int maxTime);
 
-                // Barre valores negativos importados do JSON
-                if (minTime < 0 || maxTime < 0)
+                if (!validMinTime || !validMaxTime)
+                {
+                    MarkRowAsError(row, "O Tempo de Duração excede o limite numérico permitido.");
+                    isValid = false;
+                }
+                else if (minTime < 0 || maxTime < 0)
                 {
                     MarkRowAsError(row, "O Tempo de Duração não pode ser negativo.");
                     isValid = false;
@@ -1199,13 +1012,15 @@ namespace AutoGamepad
                     isValid = false;
                 }
 
-                string strRampMin = row.Cells["colRampMin"].Value?.ToString() ?? "0";
-                string strRampMax = row.Cells["colRampMax"].Value?.ToString() ?? "0";
-                int rampMin = int.TryParse(strRampMin, out int rm) ? rm : 0;
-                int rampMax = int.TryParse(strRampMax, out int rmx) ? rmx : 0;
+                bool validRampMin = TryReadNumericCell(row, "colRampMin", out int rampMin);
+                bool validRampMax = TryReadNumericCell(row, "colRampMax", out int rampMax);
 
-                // Barre rampas negativas importadas do JSON
-                if (rampMin < 0 || rampMax < 0)
+                if (!validRampMin || !validRampMax)
+                {
+                    MarkRowAsError(row, "O Tempo de Rampa excede o limite numérico permitido.");
+                    isValid = false;
+                }
+                else if (rampMin < 0 || rampMax < 0)
                 {
                     MarkRowAsError(row, "O Tempo de Rampa não pode ser negativo.");
                     isValid = false;
@@ -1216,29 +1031,30 @@ namespace AutoGamepad
                     isValid = false;
                 }
 
-                string strJitter = row.Cells["colJitter"].Value?.ToString() ?? "0";
-                int jitterForce = int.TryParse(strJitter, out int jf) ? jf : 0;
-                if (jitterForce < 0)
+                bool validJitter = TryReadNumericCell(row, "colJitter", out int jitterForce);
+                if (!validJitter)
+                {
+                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) excede o limite numérico permitido.");
+                    isValid = false;
+                }
+                else if (jitterForce < 0)
                 {
                     MarkRowAsError(row, "O Tremor de Eixo (Jitter) não pode ser negativo.");
                     isValid = false;
                 }
 
                 // Checagem Lógica: Manter eixo em 0% ou maior que 100%
-                bool isAxisVal = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
-                if (isAxisVal)
+                if (isAxis)
                 {
-                    string strValEixo = row.Cells["colValue"].Value?.ToString() ?? "0";
-                    int valEixo = int.TryParse(strValEixo, out int ve) ? ve : 0;
+                    bool validAxisValue = TryReadNumericCell(row, "colValue", out int axisValue);
 
-                    // NOVA REGRA: Barre força de eixo inválida importada do JSON
-                    if (valEixo < 0 || valEixo > 100)
+                    if (!validAxisValue || axisValue < 0 || axisValue > 100)
                     {
                         MarkRowAsError(row, "O Valor do Eixo deve estar entre 0% e 100%.");
                         isValid = false;
                     }
 
-                    if (action == "Manter Pressionado (Hold)" && valEixo == 0)
+                    if (actionType == ActionType.Hold && axisValue == 0)
                     {
                         MarkRowAsError(row, "Manter um Eixo em 0% não tem efeito lógico. Use a ação 'Soltar'.");
                         isValid = false;
@@ -1247,16 +1063,28 @@ namespace AutoGamepad
             }
 
             // Checagem Final: Esqueceu de soltar algum botão?
-            if (heldButtons.Count > 0)
+            if (heldControls.Count > 0)
             {
                 // Se sobrou botão segurado, marca a ÚLTIMA linha como errada para avisar o usuário
                 var lastRow = gridSequence.Rows[gridSequence.Rows.Count - 1];
-                string botoesPresos = string.Join(", ", heldButtons);
+                string botoesPresos = string.Join(", ", heldControlLabels.Values);
                 MarkRowAsError(lastRow, $"A sequência terminou, mas você esqueceu de soltar: {botoesPresos}!");
                 isValid = false;
             }
 
             return isValid;
+        }
+
+        private static bool TryReadNumericCell(DataGridViewRow row, string columnName, out int value)
+        {
+            string text = row.Cells[columnName].Value?.ToString() ?? "";
+            if (string.IsNullOrWhiteSpace(text) || text == "-")
+            {
+                value = 0;
+                return true;
+            }
+
+            return int.TryParse(text, out value);
         }
 
         // Pinta a linha de vermelho, coloca o ícone e avisa no Log

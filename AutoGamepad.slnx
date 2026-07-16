@@ -1,3 +1,4 @@
 <Solution>
   <Project Path="AutoGamepad/AutoGamepad.csproj" />
+  <Project Path="AutoGamepad.Tests/AutoGamepad.Tests.csproj" />
 </Solution>

@@ -3,6 +3,13 @@
 ###############################################################################
 * text=auto
 
+# O projeto é exclusivo para Windows/WinForms. Mantém o working tree em CRLF
+# para evitar avisos de terminações inconsistentes no Visual Studio.
+*.cs      text eol=crlf
+*.csproj  text eol=crlf
+*.slnx    text eol=crlf
+*.md      text eol=crlf
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

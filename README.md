@@ -4,9 +4,9 @@ O **AutoGamepad** é um motor de automação a nível de hardware projetado para
 
 Este projeto tem como foco a alta precisão na manipulação de eixos (gatilhos e analógicos) e mecanismos de evasão comportamental (*Jitter* contínuo), voltados para ambientes restritivos.
 
-## Arquitetura e Funcionalidades (v1.1.0)
+## Arquitetura e Funcionalidades (v1.2.0-rc.1)
 
-O AutoGamepad opera como um interpretador de sequência baseada em Máquina de Estados, utilizando a programação assíncrona do C# para manter um "Game Loop" desacoplado da interface gráfica (UI).
+O AutoGamepad opera como um interpretador de sequência baseada em Máquina de Estados. Antes da execução, a interface converte a tabela em um snapshot imutável; o motor processa esse snapshot em uma thread de trabalho e não acessa controles WinForms durante os ciclos.
 
 * **Engine de Interpolação a 60 Hz:** Em vez de injeções estáticas de estado, o motor calcula transições de valores (*Rampas*) baseadas em tempo (Linear Interpolation). Isso permite a simulação orgânica da progressão de força em molas de gatilhos ou deslocamento de direcionais.
 * **Sistema de Jitter Físico:** Uma função específica para eixos. Um ruído caótico parametrizável é sobreposto ao valor atual do eixo em uma frequência configurável, mascarando padrões estáticos em logs de input de servidores.
@@ -25,7 +25,7 @@ O funcionamento do software está vinculado à presença do driver de simulaçã
 ## Como Utilizar
 
 1. **Conexão:** Inicie o software e alterne o estado para **"Conectar Controle Virtual"**. O sistema notificará a criação do periférico virtual.
-2. **Ciclos:** Defina o limite de execuções completas da rotina (Zero = Loop infinito).
+2. **Ciclos:** Marque **Limitar Ciclos** e defina a quantidade de execuções completas da rotina. Com a opção desmarcada, a rotina é executada em loop infinito.
 3. **Física (Opcional):** Se as rotinas englobarem uso de eixos contínuos, ative o sistema "Tremor (Eixos)" e configure a frequência de pulso em milissegundos.
 4. **Programação da Linha do Tempo:** Utilize a tabela visual para adicionar passos lógicos:
    * `Pressionar e Soltar (Tap)`: Completa o ciclo de Rampa Ascendente, Platô e Rampa Descendente dentro da duração definida.
@@ -39,3 +39,13 @@ O funcionamento do software está vinculado à presença do driver de simulaçã
 Este projeto encontra-se licenciado sob a **GNU GPLv3**. Permite-se a utilização, modificação e distribuição integral do software de forma aberta. Obras derivadas que incorporem este código devem, obrigatoriamente, compartilhar seu código-fonte modificado sob os mesmos termos da presente licença.
 
 *Disclaimer:* O AutoGamepad é uma ferramenta direcionada para testes QA (Quality Assurance), simulação de acessibilidade e estudo arquitetural de *Anti-AFK* local. A utilização do software em infraestruturas competitivas online pode ensejar sanções e quebra dos Termos de Serviço (TOS) das respectivas plataformas. O autor desobriga-se de qualquer responsabilidade gerada pela conduta ou emprego não-educacional deste motor de emulação.
+
+## Desenvolvimento e testes
+
+O repositório contém testes automatizados para o motor, cancelamento, limites numéricos e mapeamento de eixos físicos:
+
+```powershell
+dotnet test AutoGamepad.slnx
+```
+
+As decisões e o roteiro de validação manual da estabilização do motor estão em [`docs/engine-stabilization.md`](docs/engine-stabilization.md).
