@@ -72,11 +72,18 @@ Arquivos principais:
 - `Xbox360GamepadOutput.cs`: conexão e tradução para ViGEm;
 - `Form1.cs`: interação, validação visual e perfis.
 
+### 8. Interação contextual da tabela
+
+A tabela entra em edição no primeiro clique. Células de dropdown abrem a lista imediatamente e confirmam a seleção sem exigir que o usuário clique fora da linha, permitindo que as demais colunas sejam reconfiguradas no mesmo instante.
+
+Cada linha possui sua própria lista de controles. `Wait` seleciona automaticamente `[Vazio / Apenas Pausa]`, bloqueia a célula e oculta o botão do dropdown. `Tap`, `Hold` e `Release` removem a opção vazia; ao sair de `Wait`, a linha recebe `Botão A` como controle padrão.
+
 ## Compatibilidade
 
 - O esquema JSON e seus identificadores não foram alterados.
 - Perfis existentes continuam sendo importados e exportados.
-- A opção vazia ainda pode ser combinada com `Tap`, `Hold` e `Release`. Essa validação ficou deliberadamente fora desta branch porque será tratada por outro fluxo de interface.
+- Perfis legados com `Wait` associado a um controle são normalizados para a opção vazia.
+- Perfis legados com `Tap`, `Hold` ou `Release` associados à opção vazia são normalizados para `Botão A`.
 
 ## Testes automatizados
 
@@ -93,7 +100,8 @@ Os testes cobrem:
 - compartilhamento de canal por direções opostas;
 - aplicação do sinal correto para esquerda/baixo;
 - sorteio com `int.MaxValue` sem overflow;
-- cancelamento de sequência composta apenas por comandos instantâneos.
+- cancelamento de sequência composta apenas por comandos instantâneos;
+- normalização da opção vazia conforme a ação selecionada na tabela.
 
 ## Roteiro de validação manual
 
@@ -106,3 +114,6 @@ Com o ViGEmBus instalado:
 5. Crie movimentos sequenciais para direita e esquerda, cada um devidamente liberado; confirme a passagem suave pelo centro.
 6. Inicie duas execuções em sequência; confirme que o log visual da primeira não reaparece na segunda.
 7. Execute um perfil composto por `Hold A` e `Release A` em loop infinito; confirme que o botão Parar continua responsivo.
+8. Clique uma vez em uma célula editável e confirme que ela entra imediatamente em edição; nos dropdowns, confirme que a lista é aberta no primeiro clique.
+9. Troque `Tap` por `Hold` e confirme que as colunas de duração são bloqueadas assim que a opção é escolhida, sem clicar fora da célula.
+10. Selecione `Wait` e confirme que o controle muda para a opção vazia e fica bloqueado; retorne para uma ação executável e confirme que `Botão A` é selecionado por padrão.

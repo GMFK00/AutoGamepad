@@ -113,6 +113,24 @@ namespace AutoGamepad
         }
     }
 
+    internal static class SequenceGridRules
+    {
+        public static bool IsControlEditable(ActionType action)
+        {
+            return action != ActionType.Wait;
+        }
+
+        public static GamepadControl NormalizeControl(ActionType action, GamepadControl control)
+        {
+            if (action == ActionType.Wait)
+            {
+                return GamepadControl.None;
+            }
+
+            return control == GamepadControl.None ? GamepadControl.A : control;
+        }
+    }
+
     internal sealed record AutomationStep(
         ActionType Action,
         string ActionLabel,
