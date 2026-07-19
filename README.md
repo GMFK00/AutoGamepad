@@ -36,6 +36,7 @@ O funcionamento do software está vinculado à presença do driver de simulaçã
    * A tabela entra em edição com um clique e aplica alterações dos dropdowns imediatamente. Em `Wait` e `Mensagem de Log`, o controle é definido como vazio e bloqueado; em `Tap`, `Hold` e `Release`, a opção vazia não é oferecida.
    * `Adicionar` inclui uma etapa no final; `Inserir` cria uma etapa acima da linha selecionada. Depois de remover uma etapa, a seleção permanece na linha seguinte ou, ao excluir a última, retorna para a anterior.
    * `Inserir Log` cria um marcador acima da linha selecionada e posiciona o cursor na coluna `Mensagem de Log` para edição imediata.
+   * A coluna `Tempo acumulado` mostra o intervalo mínimo e máximo até cada etapa. Os labels superiores exibem a duração por ciclo e, quando o limite está ativo, o tempo total estimado; sem limite, o total é indicado como `execução contínua`.
 5. **Execução:** Dispare a automação via botões nativos ou mediante os ganchos locais de atalho do teclado (`Ctrl+Shift+F9` para iniciar e `Ctrl+Shift+F10` para interromper de forma abrupta).
 
 ## Licença e Ética de Uso

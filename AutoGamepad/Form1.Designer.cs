@@ -51,6 +51,7 @@
             colMinTime = new DataGridViewTextBoxColumn();
             colMaxTime = new DataGridViewTextBoxColumn();
             colJitter = new DataGridViewTextBoxColumn();
+            colCumulativeTime = new DataGridViewTextBoxColumn();
             tabPage2 = new TabPage();
             btnJsonValidate = new Button();
             btnJsonPaste = new Button();
@@ -62,6 +63,8 @@
             numMaxCycles = new NumericUpDown();
             chkEnableJitter = new CheckBox();
             numJitterFreq = new NumericUpDown();
+            lblCycleTimeEstimate = new Label();
+            lblTotalTimeEstimate = new Label();
             tabEditor.SuspendLayout();
             tabPage1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)gridSequence).BeginInit();
@@ -228,7 +231,7 @@
             gridSequence.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             gridSequence.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             gridSequence.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colMessage, colValue, colRampMin, colRampMax, colMinTime, colMaxTime, colJitter });
+            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colMessage, colValue, colRampMin, colRampMax, colMinTime, colMaxTime, colJitter, colCumulativeTime });
             gridSequence.EditMode = DataGridViewEditMode.EditOnEnter;
             gridSequence.Location = new Point(3, 6);
             gridSequence.MinimumSize = new Size(0, 188);
@@ -300,6 +303,15 @@
             colJitter.HeaderText = "Tremor Eixo (Jitter)";
             colJitter.MinimumWidth = 6;
             colJitter.Name = "colJitter";
+            //
+            // colCumulativeTime
+            //
+            colCumulativeTime.DefaultCellStyle.BackColor = SystemColors.Control;
+            colCumulativeTime.FillWeight = 130F;
+            colCumulativeTime.HeaderText = "Tempo acumulado";
+            colCumulativeTime.MinimumWidth = 6;
+            colCumulativeTime.Name = "colCumulativeTime";
+            colCumulativeTime.ReadOnly = true;
             // 
             // tabPage2
             // 
@@ -403,6 +415,7 @@
             numMaxCycles.Size = new Size(150, 27);
             numMaxCycles.TabIndex = 23;
             numMaxCycles.Value = new decimal(new int[] { 1, 0, 0, 0 });
+            numMaxCycles.ValueChanged += numMaxCycles_ValueChanged;
             // 
             // chkEnableJitter
             // 
@@ -424,12 +437,36 @@
             numJitterFreq.Size = new Size(150, 27);
             numJitterFreq.TabIndex = 25;
             numJitterFreq.Value = new decimal(new int[] { 100, 0, 0, 0 });
+            //
+            // lblCycleTimeEstimate
+            //
+            lblCycleTimeEstimate.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            lblCycleTimeEstimate.AutoEllipsis = true;
+            lblCycleTimeEstimate.Location = new Point(365, 54);
+            lblCycleTimeEstimate.Name = "lblCycleTimeEstimate";
+            lblCycleTimeEstimate.Size = new Size(559, 25);
+            lblCycleTimeEstimate.TabIndex = 26;
+            lblCycleTimeEstimate.Text = "Por ciclo: sequência vazia";
+            lblCycleTimeEstimate.TextAlign = ContentAlignment.MiddleLeft;
+            //
+            // lblTotalTimeEstimate
+            //
+            lblTotalTimeEstimate.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            lblTotalTimeEstimate.AutoEllipsis = true;
+            lblTotalTimeEstimate.Location = new Point(365, 84);
+            lblTotalTimeEstimate.Name = "lblTotalTimeEstimate";
+            lblTotalTimeEstimate.Size = new Size(559, 25);
+            lblTotalTimeEstimate.TabIndex = 27;
+            lblTotalTimeEstimate.Text = "Total: sequência vazia";
+            lblTotalTimeEstimate.TextAlign = ContentAlignment.MiddleLeft;
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1186, 649);
+            Controls.Add(lblTotalTimeEstimate);
+            Controls.Add(lblCycleTimeEstimate);
             Controls.Add(numJitterFreq);
             Controls.Add(chkEnableJitter);
             Controls.Add(numMaxCycles);
@@ -488,6 +525,9 @@
         private DataGridViewTextBoxColumn colMinTime;
         private DataGridViewTextBoxColumn colMaxTime;
         private DataGridViewTextBoxColumn colJitter;
+        private DataGridViewTextBoxColumn colCumulativeTime;
+        private Label lblCycleTimeEstimate;
+        private Label lblTotalTimeEstimate;
         private CheckBox chkEnableJitter;
         private NumericUpDown numJitterFreq;
     }

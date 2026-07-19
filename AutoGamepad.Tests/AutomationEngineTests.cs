@@ -230,13 +230,138 @@ namespace AutoGamepad.Tests
             Assert.Equal(expected.Message, actual.Message);
         }
 
+        [Theory]
+        [InlineData(ActionType.Log, (int)GamepadControl.None, 500, 900, 1_000, 2_000, 0L, 0L)]
+        [InlineData(ActionType.Wait, (int)GamepadControl.None, 500, 900, 1_000, 2_000, 1_000L, 2_000L)]
+        [InlineData(ActionType.PressAndRelease, (int)GamepadControl.A, 500, 900, 1_000, 2_000, 1_000L, 2_000L)]
+        [InlineData(ActionType.PressAndRelease, (int)GamepadControl.LeftTrigger, 500, 900, 1_000, 2_000, 2_000L, 3_800L)]
+        [InlineData(ActionType.Hold, (int)GamepadControl.A, 500, 900, 1_000, 2_000, 0L, 0L)]
+        [InlineData(ActionType.Hold, (int)GamepadControl.LeftTrigger, 500, 900, 1_000, 2_000, 500L, 900L)]
+        [InlineData(ActionType.Release, (int)GamepadControl.A, 500, 900, 1_000, 2_000, 0L, 0L)]
+        [InlineData(ActionType.Release, (int)GamepadControl.LeftTrigger, 500, 900, 1_000, 2_000, 500L, 900L)]
+        public void SequenceTimeEstimator_CalculatesEveryActionAndControlCombination(
+            ActionType action,
+            int controlValue,
+            int rampMinMs,
+            int rampMaxMs,
+            int durationMinMs,
+            int durationMaxMs,
+            long expectedMinimumMs,
+            long expectedMaximumMs)
+        {
+            AutomationStep step = CreateStep(
+                action,
+                (GamepadControl)controlValue,
+                rampMinMs: rampMinMs,
+                rampMaxMs: rampMaxMs,
+                durationMinMs: durationMinMs,
+                durationMaxMs: durationMaxMs);
+
+            SequenceTimeEstimate estimate = SequenceTimeEstimator.Calculate(CreateProgram([step]));
+
+            Assert.Equal(
+                new TimeEstimateRange(expectedMinimumMs, expectedMaximumMs),
+                estimate.StepDurations[0]);
+        }
+
+        [Fact]
+        public void SequenceTimeEstimator_AccumulatesStepsInSequenceOrder()
+        {
+            AutomationStep wait = CreateStep(
+                ActionType.Wait,
+                GamepadControl.None,
+                durationMinMs: 100,
+                durationMaxMs: 200);
+            AutomationStep axisTap = CreateStep(
+                ActionType.PressAndRelease,
+                GamepadControl.LeftTrigger,
+                rampMinMs: 50,
+                rampMaxMs: 100,
+                durationMinMs: 300,
+                durationMaxMs: 400);
+            AutomationStep marker = CreateStep(ActionType.Log, GamepadControl.None);
+
+            SequenceTimeEstimate estimate = SequenceTimeEstimator.Calculate(
+                CreateProgram([wait, axisTap, marker]));
+
+            Assert.Equal(new TimeEstimateRange(100, 200), estimate.CumulativeDurations[0]);
+            Assert.Equal(new TimeEstimateRange(500, 800), estimate.CumulativeDurations[1]);
+            Assert.Equal(new TimeEstimateRange(500, 800), estimate.CumulativeDurations[2]);
+            Assert.Equal(new TimeEstimateRange(500, 800), estimate.CycleDuration);
+        }
+
+        [Fact]
+        public void SequenceTimeEstimator_AppliesMinimumCycleDurationToInstantSequence()
+        {
+            AutomationStep marker = CreateStep(ActionType.Log, GamepadControl.None);
+
+            SequenceTimeEstimate estimate = SequenceTimeEstimator.Calculate(CreateProgram([marker]));
+
+            Assert.Equal(TimeEstimateRange.Zero, estimate.CumulativeDurations[0]);
+            Assert.Equal(
+                new TimeEstimateRange(
+                    SequenceTimeEstimator.MinimumCycleDurationMs,
+                    SequenceTimeEstimator.MinimumCycleDurationMs),
+                estimate.CycleDuration);
+        }
+
+        [Fact]
+        public void SequenceTimeEstimator_MultipliesCycleRangeWhenCycleLimitIsEnabled()
+        {
+            AutomationStep wait = CreateStep(
+                ActionType.Wait,
+                GamepadControl.None,
+                durationMinMs: 100,
+                durationMaxMs: 250);
+
+            SequenceTimeEstimate estimate = SequenceTimeEstimator.Calculate(
+                CreateProgram([wait], useCycleLimit: true, maxCycles: 4));
+
+            Assert.False(estimate.IsContinuous);
+            Assert.Equal(new TimeEstimateRange(400, 1_000), estimate.TotalDuration);
+        }
+
+        [Fact]
+        public void SequenceTimeEstimator_ReportsContinuousExecutionWithoutCycleLimit()
+        {
+            AutomationStep wait = CreateStep(
+                ActionType.Wait,
+                GamepadControl.None,
+                durationMinMs: 100,
+                durationMaxMs: 250);
+
+            SequenceTimeEstimate estimate = SequenceTimeEstimator.Calculate(CreateProgram([wait]));
+
+            Assert.True(estimate.IsContinuous);
+            Assert.Null(estimate.TotalDuration);
+        }
+
+        [Fact]
+        public void SequenceTimeEstimator_UsesLongArithmeticForMaximumIntRanges()
+        {
+            AutomationStep axisTap = CreateStep(
+                ActionType.PressAndRelease,
+                GamepadControl.LeftTrigger,
+                rampMinMs: int.MaxValue,
+                rampMaxMs: int.MaxValue,
+                durationMinMs: int.MaxValue,
+                durationMaxMs: int.MaxValue);
+
+            SequenceTimeEstimate estimate = SequenceTimeEstimator.Calculate(CreateProgram([axisTap]));
+
+            Assert.Equal(
+                new TimeEstimateRange(6_442_450_941L, 6_442_450_941L),
+                estimate.StepDurations[0]);
+        }
+
         private static AutomationProgram CreateProgram(
             IReadOnlyList<AutomationStep> steps,
-            bool useCycleLimit = false)
+            bool useCycleLimit = false,
+            int maxCycles = 1)
         {
             return new AutomationProgram(
                 useCycleLimit,
-                1,
+                maxCycles,
                 false,
                 100,
                 steps);
@@ -246,6 +371,8 @@ namespace AutoGamepad.Tests
             ActionType action,
             GamepadControl control,
             int valuePercent = 100,
+            int rampMinMs = 0,
+            int rampMaxMs = 0,
             int durationMinMs = 0,
             int durationMaxMs = 0,
             string message = "")
@@ -257,8 +384,8 @@ namespace AutoGamepad.Tests
                 control.ToString(),
                 message,
                 valuePercent,
-                0,
-                0,
+                rampMinMs,
+                rampMaxMs,
                 durationMinMs,
                 durationMaxMs,
                 0);

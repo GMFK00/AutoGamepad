@@ -12,7 +12,6 @@ namespace AutoGamepad
     internal sealed class AutomationEngine
     {
         private const int FrameDelayMs = 16;
-        private const int MinimumCycleDurationMs = FrameDelayMs;
 
         private readonly IGamepadOutput _output;
         private readonly Action<string> _log;
@@ -91,7 +90,7 @@ namespace AutoGamepad
                     loopCount++;
 
                     // Limita ciclos totalmente instantâneos à frequência do motor (aprox. 60 Hz).
-                    long remainingCycleTime = MinimumCycleDurationMs - cycleTimer.ElapsedMilliseconds;
+                    long remainingCycleTime = SequenceTimeEstimator.MinimumCycleDurationMs - cycleTimer.ElapsedMilliseconds;
                     if (remainingCycleTime > 0)
                     {
                         await Task.Delay((int)remainingCycleTime, token).ConfigureAwait(false);
