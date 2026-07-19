@@ -1,10 +1,10 @@
-# Estabilização do motor de automação
+# Evolução do motor e do editor de sequências
 
-Este documento registra as mudanças da branch `codex/stabilize-automation-engine`. A candidata `1.2.0-rc.1` foi aprovada na validação em campo e promovida para `1.2.0`. O objetivo é tornar interrupção, execução contínua e controle de eixos previsíveis sem alterar o formato dos perfis JSON existentes.
+Este documento registra a estabilização iniciada para a `v1.2.0` e as evoluções do editor, do planejamento de tempo e do acompanhamento da execução incorporadas à `v1.3.0`. O objetivo é manter interrupção, execução contínua, controle de eixos e edição de sequências previsíveis, preservando a compatibilidade com os perfis JSON existentes.
 
 ## Status da validação
 
-A execução com o controle virtual real foi validada em ambiente de campo antes da promoção para `1.2.0`, incluindo os fluxos corrigidos nesta estabilização. Os testes automatizados permanecem como proteção contra regressões.
+As mudanças da `v1.3.0` foram validadas em campo com o controle virtual real, incluindo edição contextual, operações de linha, marcadores de log, estimativas de tempo e progresso de execução. Os testes automatizados permanecem como proteção contra regressões.
 
 ## Escopo implementado
 
