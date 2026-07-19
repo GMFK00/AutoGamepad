@@ -131,6 +131,46 @@ namespace AutoGamepad
         }
     }
 
+    internal static class SequenceRowPositionRules
+    {
+        public static int GetInsertionIndex(int rowCount, int? selectedRowIndex)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(rowCount);
+
+            if (selectedRowIndex is null)
+            {
+                return rowCount;
+            }
+
+            if (selectedRowIndex < 0 || selectedRowIndex >= rowCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(selectedRowIndex));
+            }
+
+            return selectedRowIndex.Value;
+        }
+
+        public static int? GetSelectionIndexAfterRemoval(int remainingRowCount, int removedRowIndex)
+        {
+            ArgumentOutOfRangeException.ThrowIfNegative(remainingRowCount);
+
+            // Antes da remoção havia remainingRowCount + 1 linhas.
+            if (removedRowIndex < 0 || removedRowIndex > remainingRowCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(removedRowIndex));
+            }
+
+            if (remainingRowCount == 0)
+            {
+                return null;
+            }
+
+            // A linha abaixo assume o índice removido. Ao remover a última,
+            // seleciona a nova última linha, que era a imediatamente anterior.
+            return Math.Min(removedRowIndex, remainingRowCount - 1);
+        }
+    }
+
     internal sealed record AutomationStep(
         ActionType Action,
         string ActionLabel,

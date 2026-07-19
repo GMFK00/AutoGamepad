@@ -418,6 +418,7 @@ namespace AutoGamepad
             txtJsonCode.Enabled = isIdle;
             tabEditor.Enabled = isIdle;
             btnRowAdd.Enabled = isIdle;
+            btnRowInsert.Enabled = isIdle;
             btnRowRemove.Enabled = isIdle;
             btnRowUp.Enabled = isIdle;
             btnRowDown.Enabled = isIdle;
@@ -646,12 +647,39 @@ namespace AutoGamepad
         // --- BOTÃO: ADICIONAR LINHA ---
         private void btnRowAdd_Click(object sender, EventArgs e)
         {
-            int rowIndex = gridSequence.Rows.Add();
-            DataGridViewRow row = gridSequence.Rows[rowIndex];
+            InsertDefaultSequenceRow(gridSequence.Rows.Count);
+        }
+
+        // --- BOTÃO: INSERIR LINHA ACIMA DA SELEÇÃO ---
+        private void btnRowInsert_Click(object sender, EventArgs e)
+        {
+            int? selectedRowIndex = gridSequence.SelectedRows.Count > 0
+                ? gridSequence.SelectedRows[0].Index
+                : null;
+            int insertionIndex = SequenceRowPositionRules.GetInsertionIndex(
+                gridSequence.Rows.Count,
+                selectedRowIndex);
+
+            InsertDefaultSequenceRow(insertionIndex);
+        }
+
+        private void InsertDefaultSequenceRow(int rowIndex)
+        {
+            DataGridViewRow row;
 
             _isConfiguringSequenceRow = true;
             try
             {
+                if (rowIndex == gridSequence.Rows.Count)
+                {
+                    rowIndex = gridSequence.Rows.Add();
+                }
+                else
+                {
+                    gridSequence.Rows.Insert(rowIndex, 1);
+                }
+
+                row = gridSequence.Rows[rowIndex];
                 row.Cells["colAction"].Value = "Pressionar e Soltar (Tap)";
                 row.Cells["colButton"].Value = DEFAULT_CONTROL_LABEL;
 
@@ -668,9 +696,8 @@ namespace AutoGamepad
                 _isConfiguringSequenceRow = false;
             }
 
-            gridSequence.FirstDisplayedScrollingRowIndex = rowIndex;
-
             ConfigureSequenceRow(row, configureButtonOptions: true);
+            SelectSequenceRow(rowIndex);
 
             _sequenceNeedsValidation = true;
         }
@@ -684,6 +711,10 @@ namespace AutoGamepad
                 // Deleta a linha selecionada
                 int rowIndex = gridSequence.SelectedRows[0].Index;
                 gridSequence.Rows.RemoveAt(rowIndex);
+                int? selectionIndex = SequenceRowPositionRules.GetSelectionIndexAfterRemoval(
+                    gridSequence.Rows.Count,
+                    rowIndex);
+                SelectSequenceRow(selectionIndex);
             }
             else
             {
@@ -691,6 +722,24 @@ namespace AutoGamepad
                 MessageBox.Show("Selecione uma linha inteira (clicando na margem esquerda da tabela) para remover.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             _sequenceNeedsValidation = true;
+        }
+
+        private void SelectSequenceRow(int? rowIndex)
+        {
+            gridSequence.ClearSelection();
+
+            if (rowIndex is null)
+            {
+                return;
+            }
+
+            DataGridViewRow row = gridSequence.Rows[rowIndex.Value];
+            row.Selected = true;
+
+            if (!row.Displayed)
+            {
+                gridSequence.FirstDisplayedScrollingRowIndex = rowIndex.Value;
+            }
         }
 
         // --- DETECTA MUDANÇAS DENTRO DA TABELA E BLOQUEIA CÉLULAS ---

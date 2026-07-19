@@ -46,6 +46,37 @@ namespace AutoGamepad.Tests
             Assert.Equal(expectedEditable, SequenceGridRules.IsControlEditable(action));
         }
 
+        [Theory]
+        [InlineData(0, null, 0)]
+        [InlineData(3, null, 3)]
+        [InlineData(3, 0, 0)]
+        [InlineData(3, 1, 1)]
+        [InlineData(3, 2, 2)]
+        public void SequenceRowPositionRules_InsertAboveSelectionOrAppendWhenUnselected(
+            int rowCount,
+            int? selectedRowIndex,
+            int expectedInsertionIndex)
+        {
+            Assert.Equal(
+                expectedInsertionIndex,
+                SequenceRowPositionRules.GetInsertionIndex(rowCount, selectedRowIndex));
+        }
+
+        [Theory]
+        [InlineData(0, 0, null)]
+        [InlineData(2, 0, 0)]
+        [InlineData(2, 1, 1)]
+        [InlineData(2, 2, 1)]
+        public void SequenceRowPositionRules_SelectsFollowingRowOrPreviousWhenLastWasRemoved(
+            int remainingRowCount,
+            int removedRowIndex,
+            int? expectedSelectionIndex)
+        {
+            Assert.Equal(
+                expectedSelectionIndex,
+                SequenceRowPositionRules.GetSelectionIndexAfterRemoval(remainingRowCount, removedRowIndex));
+        }
+
         [Fact]
         public async Task RunAsync_UsesSignedValuesForStickDirections()
         {
