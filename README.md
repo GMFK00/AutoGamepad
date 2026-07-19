@@ -33,6 +33,7 @@ O funcionamento do software está vinculado à presença do driver de simulaçã
    * `Soltar (Release)`: Conclui a rampa de descida para a posição neutra e avança.
    * `Pausa (Wait)`: Paralisa o motor no estado atual por um tempo aleatório determinado pelas colunas Min e Max.
    * A tabela entra em edição com um clique e aplica alterações dos dropdowns imediatamente. Em `Wait`, o botão é definido como vazio e bloqueado; nas demais ações, a opção vazia não é oferecida.
+   * `Adicionar` inclui uma etapa no final; `Inserir` cria uma etapa acima da linha selecionada. Depois de remover uma etapa, a seleção permanece na linha seguinte ou, ao excluir a última, retorna para a anterior.
 5. **Execução:** Dispare a automação via botões nativos ou mediante os ganchos locais de atalho do teclado (`Ctrl+Shift+F9` para iniciar e `Ctrl+Shift+F10` para interromper de forma abrupta).
 
 ## Licença e Ética de Uso

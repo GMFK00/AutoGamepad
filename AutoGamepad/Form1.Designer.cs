@@ -38,6 +38,7 @@
             btnRowDown = new Button();
             btnRowUp = new Button();
             btnRowRemove = new Button();
+            btnRowInsert = new Button();
             btnRowAdd = new Button();
             gridSequence = new DataGridView();
             colAction = new DataGridViewComboBoxColumn();
@@ -140,6 +141,7 @@
             tabPage1.Controls.Add(btnRowDown);
             tabPage1.Controls.Add(btnRowUp);
             tabPage1.Controls.Add(btnRowRemove);
+            tabPage1.Controls.Add(btnRowInsert);
             tabPage1.Controls.Add(btnRowAdd);
             tabPage1.Controls.Add(gridSequence);
             tabPage1.Location = new Point(4, 29);
@@ -153,10 +155,10 @@
             // btnRowDown
             // 
             btnRowDown.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRowDown.Location = new Point(1051, 151);
+            btnRowDown.Location = new Point(1051, 200);
             btnRowDown.Name = "btnRowDown";
             btnRowDown.Size = new Size(119, 43);
-            btnRowDown.TabIndex = 4;
+            btnRowDown.TabIndex = 5;
             btnRowDown.Text = "⬇️ Descer";
             btnRowDown.UseVisualStyleBackColor = true;
             btnRowDown.Click += btnRowDown_Click;
@@ -164,10 +166,10 @@
             // btnRowUp
             // 
             btnRowUp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRowUp.Location = new Point(1051, 104);
+            btnRowUp.Location = new Point(1051, 153);
             btnRowUp.Name = "btnRowUp";
             btnRowUp.Size = new Size(119, 43);
-            btnRowUp.TabIndex = 3;
+            btnRowUp.TabIndex = 4;
             btnRowUp.Text = "⬆️ Subir";
             btnRowUp.UseVisualStyleBackColor = true;
             btnRowUp.Click += btnRowUp_Click;
@@ -175,14 +177,25 @@
             // btnRowRemove
             // 
             btnRowRemove.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRowRemove.Location = new Point(1051, 55);
+            btnRowRemove.Location = new Point(1051, 104);
             btnRowRemove.Name = "btnRowRemove";
             btnRowRemove.Size = new Size(119, 43);
-            btnRowRemove.TabIndex = 2;
+            btnRowRemove.TabIndex = 3;
             btnRowRemove.Text = "🗑️ Remover";
             btnRowRemove.UseVisualStyleBackColor = true;
             btnRowRemove.Click += btnRowRemove_Click;
-            // 
+            //
+            // btnRowInsert
+            //
+            btnRowInsert.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRowInsert.Location = new Point(1051, 55);
+            btnRowInsert.Name = "btnRowInsert";
+            btnRowInsert.Size = new Size(119, 43);
+            btnRowInsert.TabIndex = 2;
+            btnRowInsert.Text = "⤴️ Inserir";
+            btnRowInsert.UseVisualStyleBackColor = true;
+            btnRowInsert.Click += btnRowInsert_Click;
+            //
             // btnRowAdd
             // 
             btnRowAdd.Anchor = AnchorStyles.Top | AnchorStyles.Right;
@@ -434,6 +447,7 @@
         private Button btnRowDown;
         private Button btnRowUp;
         private Button btnRowRemove;
+        private Button btnRowInsert;
         private Button btnRowAdd;
         private RichTextBox txtJsonCode;
         private Button btnJsonValidate;
