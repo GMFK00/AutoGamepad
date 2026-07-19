@@ -15,13 +15,19 @@ namespace AutoGamepad
 
         private readonly IGamepadOutput _output;
         private readonly Action<string> _log;
+        private readonly Action<AutomationProgress>? _progress;
         private readonly Random _random;
         private readonly Dictionary<AxisChannel, float> _axisStates = new();
 
-        public AutomationEngine(IGamepadOutput output, Action<string> log, Random? random = null)
+        public AutomationEngine(
+            IGamepadOutput output,
+            Action<string> log,
+            Random? random = null,
+            Action<AutomationProgress>? progress = null)
         {
             _output = output;
             _log = log;
+            _progress = progress;
             _random = random ?? new Random();
         }
 
@@ -58,6 +64,13 @@ namespace AutoGamepad
                     {
                         token.ThrowIfCancellationRequested();
                         AutomationStep step = program.Steps[index];
+                        _progress?.Invoke(new AutomationProgress(
+                            loopCount,
+                            program.UseCycleLimit ? program.MaxCycles : null,
+                            index,
+                            program.Steps.Count,
+                            step.Action,
+                            step.ActionLabel));
 
                         if (step.Action == ActionType.Log)
                         {

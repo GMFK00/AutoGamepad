@@ -20,6 +20,14 @@ namespace AutoGamepad
         private bool _sequenceNeedsValidation = true;
         private bool _isConfiguringSequenceRow;
         private bool _isUpdatingTimeEstimates;
+        private readonly object _executionProgressLock = new object();
+        private (int ExecutionId, AutomationProgress Progress)? _pendingExecutionProgress;
+        private bool _executionProgressDispatchScheduled;
+        private bool _isApplyingExecutionHighlight;
+        private int _nextExecutionId;
+        private int? _activeExecutionId;
+        private int? _selectedRowBeforeExecution;
+        private int? _highlightedExecutionRowIndex;
 
         private const string EMPTY_CONTROL_LABEL = "[Vazio / Apenas Pausa]";
         private const string DEFAULT_CONTROL_LABEL = "Botão A";
@@ -151,6 +159,9 @@ namespace AutoGamepad
 
             AutomationProgram program = CreateAutomationProgram();
             Xbox360GamepadOutput output = _gamepadOutput;
+            int executionId = BeginExecutionProgressTracking();
+            AutomationProgress? latestProgress = null;
+            string finalStatus = "Finalizado";
 
             // Trava os botões para o usuário não clicar duas vezes
             ToggleUI(false);
@@ -169,16 +180,26 @@ namespace AutoGamepad
                 PlaySound(true);
 
                 // O motor recebe somente um snapshot imutável e não acessa controles WinForms.
-                var engine = new AutomationEngine(output, Log);
+                var engine = new AutomationEngine(
+                    output,
+                    Log,
+                    progress: progress =>
+                    {
+                        latestProgress = progress;
+                        QueueExecutionProgress(executionId, progress);
+                    });
                 _automationTask = Task.Run(() => engine.RunAsync(program, cancellationSource.Token), cancellationSource.Token);
                 await _automationTask;
+                finalStatus = ExecutionProgressFormatter.FormatCompleted(program.MaxCycles);
             }
             catch (OperationCanceledException)
             {
+                finalStatus = ExecutionProgressFormatter.FormatInterrupted(latestProgress);
                 Log("[!] Automação interrompida pelo usuário.");
             }
             catch (Exception ex)
             {
+                finalStatus = ExecutionProgressFormatter.FormatFailed(latestProgress);
                 Log($"[ERRO] {ex.Message}");
             }
             finally
@@ -193,7 +214,9 @@ namespace AutoGamepad
                     _cancellationTokenSource = null;
                 }
                 cancellationSource.Dispose();
+                EndExecutionProgressTracking(executionId);
                 ToggleUI(true);
+                lblExecutionStatus.Text = finalStatus;
                 Log("Ciclo de automação finalizado.");
             }
         }
@@ -203,6 +226,171 @@ namespace AutoGamepad
         {
             Log("Solicitando parada imediata...");
             _cancellationTokenSource?.Cancel(); // Avisa o loop para abortar
+        }
+
+        private int BeginExecutionProgressTracking()
+        {
+            int executionId = unchecked(++_nextExecutionId);
+            _activeExecutionId = executionId;
+            _selectedRowBeforeExecution = gridSequence.SelectedRows.Count > 0
+                ? gridSequence.SelectedRows[0].Index
+                : gridSequence.CurrentCell?.RowIndex;
+            _highlightedExecutionRowIndex = null;
+            lblExecutionStatus.Text = "Preparando execução...";
+            tabEditor.SelectedTab = tabPage1;
+            return executionId;
+        }
+
+        private void QueueExecutionProgress(int executionId, AutomationProgress progress)
+        {
+            bool scheduleDispatch;
+            lock (_executionProgressLock)
+            {
+                _pendingExecutionProgress = (executionId, progress);
+                scheduleDispatch = !_executionProgressDispatchScheduled;
+                if (scheduleDispatch)
+                {
+                    _executionProgressDispatchScheduled = true;
+                }
+            }
+
+            if (!scheduleDispatch)
+            {
+                return;
+            }
+
+            try
+            {
+                if (IsDisposed || Disposing || !IsHandleCreated)
+                {
+                    CancelExecutionProgressDispatch();
+                    return;
+                }
+
+                BeginInvoke(new Action(ProcessPendingExecutionProgress));
+            }
+            catch (InvalidOperationException)
+            {
+                CancelExecutionProgressDispatch();
+            }
+        }
+
+        private void CancelExecutionProgressDispatch()
+        {
+            lock (_executionProgressLock)
+            {
+                _pendingExecutionProgress = null;
+                _executionProgressDispatchScheduled = false;
+            }
+        }
+
+        private void ProcessPendingExecutionProgress()
+        {
+            (int ExecutionId, AutomationProgress Progress)? pending;
+            lock (_executionProgressLock)
+            {
+                pending = _pendingExecutionProgress;
+                _pendingExecutionProgress = null;
+                _executionProgressDispatchScheduled = false;
+            }
+
+            if (!pending.HasValue || _activeExecutionId != pending.Value.ExecutionId)
+            {
+                return;
+            }
+
+            AutomationProgress progress = pending.Value.Progress;
+            lblExecutionStatus.Text = ExecutionProgressFormatter.FormatRunning(progress);
+            HighlightExecutionRow(progress.StepIndex);
+        }
+
+        private void HighlightExecutionRow(int rowIndex)
+        {
+            if (rowIndex < 0 || rowIndex >= gridSequence.Rows.Count)
+            {
+                return;
+            }
+
+            if (_highlightedExecutionRowIndex is int previousRowIndex
+                && previousRowIndex != rowIndex
+                && previousRowIndex < gridSequence.Rows.Count)
+            {
+                ResetExecutionRowStyle(gridSequence.Rows[previousRowIndex]);
+            }
+
+            DataGridViewRow row = gridSequence.Rows[rowIndex];
+            row.DefaultCellStyle.SelectionBackColor = Color.Gold;
+            row.DefaultCellStyle.SelectionForeColor = Color.Black;
+            _highlightedExecutionRowIndex = rowIndex;
+
+            _isApplyingExecutionHighlight = true;
+            try
+            {
+                gridSequence.ClearSelection();
+                gridSequence.CurrentCell = row.Cells[0];
+                row.Selected = true;
+
+                if (!row.Displayed)
+                {
+                    gridSequence.FirstDisplayedScrollingRowIndex = rowIndex;
+                }
+            }
+            finally
+            {
+                _isApplyingExecutionHighlight = false;
+            }
+        }
+
+        private static void ResetExecutionRowStyle(DataGridViewRow row)
+        {
+            row.DefaultCellStyle.SelectionBackColor = Color.Empty;
+            row.DefaultCellStyle.SelectionForeColor = Color.Empty;
+        }
+
+        private void EndExecutionProgressTracking(int executionId)
+        {
+            if (_activeExecutionId != executionId)
+            {
+                return;
+            }
+
+            _activeExecutionId = null;
+
+            lock (_executionProgressLock)
+            {
+                if (_pendingExecutionProgress?.ExecutionId == executionId)
+                {
+                    _pendingExecutionProgress = null;
+                }
+            }
+
+            if (_highlightedExecutionRowIndex is int highlightedRowIndex
+                && highlightedRowIndex < gridSequence.Rows.Count)
+            {
+                ResetExecutionRowStyle(gridSequence.Rows[highlightedRowIndex]);
+            }
+
+            _highlightedExecutionRowIndex = null;
+            int? rowToRestore = _selectedRowBeforeExecution is int selectedRowIndex
+                && selectedRowIndex < gridSequence.Rows.Count
+                    ? selectedRowIndex
+                    : null;
+            _selectedRowBeforeExecution = null;
+            SelectSequenceRow(rowToRestore);
+        }
+
+        private void gridSequence_SelectionChanged(object sender, EventArgs e)
+        {
+            if (_isApplyingExecutionHighlight
+                || _activeExecutionId is null
+                || _highlightedExecutionRowIndex is not int rowIndex
+                || rowIndex >= gridSequence.Rows.Count
+                || gridSequence.Rows[rowIndex].Selected)
+            {
+                return;
+            }
+
+            HighlightExecutionRow(rowIndex);
         }
 
         // --- ZERA O CONTROLE (PONTO MORTO) ---
@@ -548,10 +736,10 @@ namespace AutoGamepad
             btnStop.Enabled = !isIdle;
             chkConnect.Enabled = isIdle;
 
-            // Travas da Tabela e do Editor JSON
-            gridSequence.Enabled = isIdle;
+            // A tabela permanece visível e navegável para exibir o progresso,
+            // mas não pode ser editada enquanto o motor está ativo.
+            gridSequence.ReadOnly = !isIdle;
             txtJsonCode.Enabled = isIdle;
-            tabEditor.Enabled = isIdle;
             btnRowAdd.Enabled = isIdle;
             btnRowInsert.Enabled = isIdle;
             btnRowInsertLog.Enabled = isIdle;

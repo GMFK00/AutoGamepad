@@ -37,6 +37,7 @@ O funcionamento do software está vinculado à presença do driver de simulaçã
    * `Adicionar` inclui uma etapa no final; `Inserir` cria uma etapa acima da linha selecionada. Depois de remover uma etapa, a seleção permanece na linha seguinte ou, ao excluir a última, retorna para a anterior.
    * `Inserir Log` cria um marcador acima da linha selecionada e posiciona o cursor na coluna `Mensagem de Log` para edição imediata.
    * A coluna `Tempo acumulado` mostra o intervalo mínimo e máximo até cada etapa. Os labels superiores exibem a duração por ciclo e, quando o limite está ativo, o tempo total estimado; sem limite, o total é indicado como `execução contínua`.
+   * Durante a execução, o label de estado mostra ciclo e linha atuais. A etapa ativa é destacada na tabela e mantida visível automaticamente; ao finalizar, interromper ou falhar, o destaque é removido e a seleção anterior é restaurada.
 5. **Execução:** Dispare a automação via botões nativos ou mediante os ganchos locais de atalho do teclado (`Ctrl+Shift+F9` para iniciar e `Ctrl+Shift+F10` para interromper de forma abrupta).
 
 ## Licença e Ética de Uso
