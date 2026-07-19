@@ -202,6 +202,7 @@
             gridSequence.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             gridSequence.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
             gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colValue, colRampMin, colRampMax, colMinTime, colMaxTime, colJitter });
+            gridSequence.EditMode = DataGridViewEditMode.EditOnEnter;
             gridSequence.Location = new Point(3, 6);
             gridSequence.MinimumSize = new Size(0, 188);
             gridSequence.MultiSelect = false;
@@ -210,8 +211,10 @@
             gridSequence.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
             gridSequence.Size = new Size(1042, 332);
             gridSequence.TabIndex = 0;
+            gridSequence.CellClick += gridSequence_CellClick;
             gridSequence.CellValidating += gridSequence_CellValidating;
             gridSequence.CellValueChanged += gridSequence_CellValueChanged;
+            gridSequence.CurrentCellDirtyStateChanged += gridSequence_CurrentCellDirtyStateChanged;
             gridSequence.EditingControlShowing += gridSequence_EditingControlShowing;
             // 
             // colAction

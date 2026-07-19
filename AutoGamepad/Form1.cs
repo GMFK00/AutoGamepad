@@ -17,6 +17,10 @@ namespace AutoGamepad
         private CancellationTokenSource? _cancellationTokenSource;
         private Task? _automationTask;
         private bool _sequenceNeedsValidation = true;
+        private bool _isConfiguringSequenceRow;
+
+        private const string EMPTY_CONTROL_LABEL = "[Vazio / Apenas Pausa]";
+        private const string DEFAULT_CONTROL_LABEL = "Botão A";
 
         // Variáveis de Gestão de Log Seguro (Anti-Memory Leak)
         private const int MAX_LOG_LINES_UI = 500; // Máximo de linhas mostradas na tela preta
@@ -41,8 +45,8 @@ namespace AutoGamepad
         // Traduz Botões (Tabela -> JSON)
         private readonly Dictionary<string, string> _buttonToJson = new()
         {
-            { "[Vazio / Apenas Pausa]", "None" },
-            { "Botão A", "A" }, { "Botão B", "B" }, { "Botão X", "X" }, { "Botão Y", "Y" },
+            { EMPTY_CONTROL_LABEL, "None" },
+            { DEFAULT_CONTROL_LABEL, "A" }, { "Botão B", "B" }, { "Botão X", "X" }, { "Botão Y", "Y" },
             { "Botão Start", "Start" }, { "Botão Select (Back)", "Back" },
             { "D-Pad Cima", "Up" }, { "D-Pad Baixo", "Down" }, { "D-Pad Esquerda", "Left" }, { "D-Pad Direita", "Right" },
             { "Ombro Esquerdo (LB)", "LB" }, { "Ombro Direito (RB)", "RB" },
@@ -64,7 +68,7 @@ namespace AutoGamepad
         private string GetButtonFromJson(string jsonButton)
         {
             foreach (var kvp in _buttonToJson) if (kvp.Value == jsonButton) return kvp.Key;
-            return "[Vazio / Apenas Pausa]"; // Fallback seguro
+            return EMPTY_CONTROL_LABEL; // Fallback seguro
         }
 
         // --- HOTKEYS GLOBAIS DO WINDOWS ---
@@ -361,18 +365,26 @@ namespace AutoGamepad
                     int rowIndex = gridSequence.Rows.Add();
                     var row = gridSequence.Rows[rowIndex];
 
-                    // Lê o nome curto do JSON e devolve a frase longa pra Tabela
-                    row.Cells["colAction"].Value = GetActionFromJson(step.Action);
-                    row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
+                    _isConfiguringSequenceRow = true;
+                    try
+                    {
+                        // Lê o nome curto do JSON e devolve a frase longa pra Tabela
+                        row.Cells["colAction"].Value = GetActionFromJson(step.Action);
+                        row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
 
-                    row.Cells["colValue"].Value = step.ValuePercent.ToString();
-                    row.Cells["colRampMin"].Value = step.RampMin.ToString();
-                    row.Cells["colRampMax"].Value = step.RampMax.ToString();
-                    row.Cells["colMinTime"].Value = step.WaitMin.ToString();
-                    row.Cells["colMaxTime"].Value = step.WaitMax.ToString();
-                    row.Cells["colJitter"].Value = step.JitterForce.ToString();
+                        row.Cells["colValue"].Value = step.ValuePercent.ToString();
+                        row.Cells["colRampMin"].Value = step.RampMin.ToString();
+                        row.Cells["colRampMax"].Value = step.RampMax.ToString();
+                        row.Cells["colMinTime"].Value = step.WaitMin.ToString();
+                        row.Cells["colMaxTime"].Value = step.WaitMax.ToString();
+                        row.Cells["colJitter"].Value = step.JitterForce.ToString();
+                    }
+                    finally
+                    {
+                        _isConfiguringSequenceRow = false;
+                    }
 
-                    gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colButton"]!.Index, rowIndex));
+                    ConfigureSequenceRow(row, configureButtonOptions: true);
                 }
 
                 _sequenceNeedsValidation = true;
@@ -617,39 +629,12 @@ namespace AutoGamepad
             // 2. Pega a coluna "Botão/Eixo" 
             var buttonColumn = (DataGridViewComboBoxColumn)gridSequence.Columns["colButton"]!;
             buttonColumn.Items.Clear();
-            buttonColumn.Items.Add("[Vazio / Apenas Pausa]");
-
-            // Botões Digitais
-            buttonColumn.Items.Add("Botão A");
-            buttonColumn.Items.Add("Botão B");
-            buttonColumn.Items.Add("Botão X");
-            buttonColumn.Items.Add("Botão Y");
-            buttonColumn.Items.Add("Botão Start");
-            buttonColumn.Items.Add("Botão Select (Back)");
-            buttonColumn.Items.Add("D-Pad Cima");
-            buttonColumn.Items.Add("D-Pad Baixo");
-            buttonColumn.Items.Add("D-Pad Esquerda");
-            buttonColumn.Items.Add("D-Pad Direita");
-            buttonColumn.Items.Add("Ombro Esquerdo (LB)");
-            buttonColumn.Items.Add("Ombro Direito (RB)");
-            buttonColumn.Items.Add("Clique Analógico Esq (L3)");
-            buttonColumn.Items.Add("Clique Analógico Dir (R3)");
-
-            // Gatilhos Analógicos (0 a 100%)
-            buttonColumn.Items.Add("Gatilho Esquerdo (LT)");
-            buttonColumn.Items.Add("Gatilho Direito (RT)");
-
-            // Movimento Analógico Esquerdo (0 a 100%)
-            buttonColumn.Items.Add("Analógico Esq - Cima");
-            buttonColumn.Items.Add("Analógico Esq - Baixo");
-            buttonColumn.Items.Add("Analógico Esq - Esquerda");
-            buttonColumn.Items.Add("Analógico Esq - Direita");
-
-            // Movimento Analógico Direito (0 a 100%)
-            buttonColumn.Items.Add("Analógico Dir - Cima");
-            buttonColumn.Items.Add("Analógico Dir - Baixo");
-            buttonColumn.Items.Add("Analógico Dir - Esquerda");
-            buttonColumn.Items.Add("Analógico Dir - Direita");
+            foreach (string buttonLabel in _buttonToJson.Keys)
+            {
+                // A coluna mantém a lista completa como template. Cada linha recebe
+                // depois sua própria lista contextual por meio de ConfigureSequenceRow.
+                buttonColumn.Items.Add(buttonLabel);
+            }
 
             // BLOQUEIO DE ORDENAÇÃO: Impede o usuário de reordenar a tabela clicando no cabeçalho
             foreach (DataGridViewColumn col in gridSequence.Columns)
@@ -662,22 +647,30 @@ namespace AutoGamepad
         private void btnRowAdd_Click(object sender, EventArgs e)
         {
             int rowIndex = gridSequence.Rows.Add();
+            DataGridViewRow row = gridSequence.Rows[rowIndex];
 
-            gridSequence.Rows[rowIndex].Cells["colAction"].Value = "Pressionar e Soltar (Tap)";
-            gridSequence.Rows[rowIndex].Cells["colButton"].Value = "Botão A";
+            _isConfiguringSequenceRow = true;
+            try
+            {
+                row.Cells["colAction"].Value = "Pressionar e Soltar (Tap)";
+                row.Cells["colButton"].Value = DEFAULT_CONTROL_LABEL;
 
-            // Coloca valores padrão em tudo pra não ficar vazio
-            gridSequence.Rows[rowIndex].Cells["colValue"].Value = "100";
-            gridSequence.Rows[rowIndex].Cells["colRampMin"].Value = "0";
-            gridSequence.Rows[rowIndex].Cells["colRampMax"].Value = "0";
-            gridSequence.Rows[rowIndex].Cells["colMinTime"].Value = "100";
-            gridSequence.Rows[rowIndex].Cells["colMaxTime"].Value = "100";
-            gridSequence.Rows[rowIndex].Cells["colJitter"].Value = "0";
+                // Coloca valores padrão em tudo pra não ficar vazio
+                row.Cells["colValue"].Value = "100";
+                row.Cells["colRampMin"].Value = "0";
+                row.Cells["colRampMax"].Value = "0";
+                row.Cells["colMinTime"].Value = "100";
+                row.Cells["colMaxTime"].Value = "100";
+                row.Cells["colJitter"].Value = "0";
+            }
+            finally
+            {
+                _isConfiguringSequenceRow = false;
+            }
 
             gridSequence.FirstDisplayedScrollingRowIndex = rowIndex;
 
-            // Força a tabela a checar a regra assim que a linha nasce
-            gridSequence_CellValueChanged(this, new DataGridViewCellEventArgs(gridSequence.Columns["colAction"]!.Index, rowIndex));
+            ConfigureSequenceRow(row, configureButtonOptions: true);
 
             _sequenceNeedsValidation = true;
         }
@@ -703,29 +696,87 @@ namespace AutoGamepad
         // --- DETECTA MUDANÇAS DENTRO DA TABELA E BLOQUEIA CÉLULAS ---
         private void gridSequence_CellValueChanged(object sender, DataGridViewCellEventArgs e)
         {
-            if (e.RowIndex < 0) return;
+            if (_isConfiguringSequenceRow || e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
             string colName = gridSequence.Columns[e.ColumnIndex].Name;
 
             // Se o usuário alterou a Ação ou o Botão, recalcula as travas
-            if (colName == "colAction" || colName == "colButton")
+            if (colName == "colAction")
             {
-                var row = gridSequence.Rows[e.RowIndex];
-                string action = row.Cells["colAction"].Value?.ToString() ?? "";
-                string button = row.Cells["colButton"].Value?.ToString() ?? "";
+                ConfigureSequenceRow(gridSequence.Rows[e.RowIndex], configureButtonOptions: true);
+            }
+            else if (colName == "colButton")
+            {
+                ConfigureSequenceRow(gridSequence.Rows[e.RowIndex], configureButtonOptions: false);
+            }
 
-                bool isAxis = button.StartsWith("Gatilho") || button.StartsWith("Analógico");
+            _sequenceNeedsValidation = true;
+        }
 
-                // Células da linha
-                var cellValue = row.Cells["colValue"];
-                var cellRampMin = row.Cells["colRampMin"];
-                var cellRampMax = row.Cells["colRampMax"];
-                var cellTimeMin = row.Cells["colMinTime"];
-                var cellTimeMax = row.Cells["colMaxTime"];
-                var cellJitter = row.Cells["colJitter"];
+        private void ConfigureSequenceRow(DataGridViewRow row, bool configureButtonOptions)
+        {
+            if (_isConfiguringSequenceRow) return;
 
-                // Função auxiliar interna para pintar a célula e definir valor padrão
-                void SetCellState(DataGridViewCell cell, bool enabled, string defaultValue = "-")
+            _isConfiguringSequenceRow = true;
+            try
+            {
+                string actionLabel = row.Cells["colAction"].Value?.ToString() ?? "";
+                ActionType action = ParseAction(actionLabel);
+                var buttonCell = (DataGridViewComboBoxCell)row.Cells["colButton"];
+
+                if (configureButtonOptions)
+                {
+                    string currentLabel = buttonCell.Value?.ToString() ?? EMPTY_CONTROL_LABEL;
+                    GamepadControl currentControl = GetGamepadControl(currentLabel);
+                    GamepadControl normalizedControl = SequenceGridRules.NormalizeControl(action, currentControl);
+                    bool isButtonEditable = SequenceGridRules.IsControlEditable(action);
+
+                    string normalizedLabel = normalizedControl switch
+                    {
+                        GamepadControl.None => EMPTY_CONTROL_LABEL,
+                        GamepadControl.A when currentControl == GamepadControl.None => DEFAULT_CONTROL_LABEL,
+                        _ => currentLabel
+                    };
+
+                    // O valor é removido antes dos itens para evitar que o DataGridView
+                    // tente renderizar temporariamente uma opção que não existe na lista.
+                    buttonCell.Value = null;
+                    buttonCell.Items.Clear();
+
+                    if (isButtonEditable)
+                    {
+                        foreach (string availableButtonLabel in _buttonToJson.Keys)
+                        {
+                            if (availableButtonLabel != EMPTY_CONTROL_LABEL)
+                            {
+                                buttonCell.Items.Add(availableButtonLabel);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        buttonCell.Items.Add(EMPTY_CONTROL_LABEL);
+                    }
+
+                    buttonCell.ReadOnly = !isButtonEditable;
+                    buttonCell.Style.BackColor = isButtonEditable ? System.Drawing.Color.White : System.Drawing.Color.LightGray;
+                    buttonCell.DisplayStyle = isButtonEditable
+                        ? DataGridViewComboBoxDisplayStyle.DropDownButton
+                        : DataGridViewComboBoxDisplayStyle.Nothing;
+                    buttonCell.Value = normalizedLabel;
+                }
+
+                string buttonLabel = buttonCell.Value?.ToString() ?? EMPTY_CONTROL_LABEL;
+                bool isAxis = GamepadControlCatalog.TryGetAxisBinding(GetGamepadControl(buttonLabel), out _);
+
+                DataGridViewCell cellValue = row.Cells["colValue"];
+                DataGridViewCell cellRampMin = row.Cells["colRampMin"];
+                DataGridViewCell cellRampMax = row.Cells["colRampMax"];
+                DataGridViewCell cellTimeMin = row.Cells["colMinTime"];
+                DataGridViewCell cellTimeMax = row.Cells["colMaxTime"];
+                DataGridViewCell cellJitter = row.Cells["colJitter"];
+
+                static void SetCellState(DataGridViewCell cell, bool enabled, string defaultValue = "-")
                 {
                     cell.ReadOnly = !enabled;
                     cell.Style.BackColor = enabled ? System.Drawing.Color.White : System.Drawing.Color.LightGray;
@@ -733,46 +784,82 @@ namespace AutoGamepad
                     else if (cell.Value?.ToString() == "-") cell.Value = defaultValue;
                 }
 
-                // Aplica a lógica física exata para cada tipo de ação
-                if (action.Contains("Pausa"))
+                switch (action)
                 {
-                    SetCellState(cellValue, false);
-                    SetCellState(cellRampMin, false);
-                    SetCellState(cellRampMax, false);
-                    SetCellState(cellTimeMin, true, "100");
-                    SetCellState(cellTimeMax, true, "100");
-                    SetCellState(cellJitter, false);
+                    case ActionType.Wait:
+                        SetCellState(cellValue, false);
+                        SetCellState(cellRampMin, false);
+                        SetCellState(cellRampMax, false);
+                        SetCellState(cellTimeMin, true, "100");
+                        SetCellState(cellTimeMax, true, "100");
+                        SetCellState(cellJitter, false);
+                        break;
+
+                    case ActionType.PressAndRelease:
+                        SetCellState(cellValue, isAxis, "100");
+                        SetCellState(cellRampMin, isAxis, "0");
+                        SetCellState(cellRampMax, isAxis, "0");
+                        SetCellState(cellTimeMin, true, "100");
+                        SetCellState(cellTimeMax, true, "100");
+                        SetCellState(cellJitter, isAxis, "0");
+                        break;
+
+                    case ActionType.Hold:
+                        SetCellState(cellValue, isAxis, "100");
+                        SetCellState(cellRampMin, isAxis, "0");
+                        SetCellState(cellRampMax, isAxis, "0");
+                        SetCellState(cellTimeMin, false);
+                        SetCellState(cellTimeMax, false);
+                        SetCellState(cellJitter, isAxis, "0");
+                        break;
+
+                    case ActionType.Release:
+                        SetCellState(cellValue, false);
+                        SetCellState(cellRampMin, isAxis, "0");
+                        SetCellState(cellRampMax, isAxis, "0");
+                        SetCellState(cellTimeMin, false);
+                        SetCellState(cellTimeMax, false);
+                        SetCellState(cellJitter, false);
+                        break;
                 }
-                else if (action.Contains("Pressionar e Soltar")) // Tap
-                {
-                    SetCellState(cellValue, isAxis, "100");
-                    SetCellState(cellRampMin, isAxis, "0");
-                    SetCellState(cellRampMax, isAxis, "0");
-                    SetCellState(cellTimeMin, true, "100");
-                    SetCellState(cellTimeMax, true, "100");
-                    SetCellState(cellJitter, isAxis, "0");
-                }
-                else if (action.Contains("Manter Pressionado")) // Hold
-                {
-                    SetCellState(cellValue, isAxis, "100");
-                    SetCellState(cellRampMin, isAxis, "0");
-                    SetCellState(cellRampMax, isAxis, "0");
-                    SetCellState(cellTimeMin, false);
-                    SetCellState(cellTimeMax, false);
-                    SetCellState(cellJitter, isAxis, "0");
-                }
-                else if (action.Contains("Soltar")) // Release
-                {
-                    SetCellState(cellValue, false);
-                    SetCellState(cellRampMin, isAxis, "0");
-                    SetCellState(cellRampMax, isAxis, "0");
-                    SetCellState(cellTimeMin, false);
-                    SetCellState(cellTimeMax, false);
-                    SetCellState(cellJitter, false);
-                }
+            }
+            finally
+            {
+                _isConfiguringSequenceRow = false;
             }
 
             _sequenceNeedsValidation = true;
+        }
+
+        // Um clique seleciona a célula e já abre o dropdown quando aplicável.
+        private void gridSequence_CellClick(object sender, DataGridViewCellEventArgs e)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex < 0) return;
+
+            DataGridViewCell cell = gridSequence.Rows[e.RowIndex].Cells[e.ColumnIndex];
+            if (cell.ReadOnly || cell is not DataGridViewComboBoxCell) return;
+
+            gridSequence.CurrentCell = cell;
+            if (!gridSequence.IsCurrentCellInEditMode)
+            {
+                gridSequence.BeginEdit(selectAll: true);
+            }
+
+            if (gridSequence.EditingControl is DataGridViewComboBoxEditingControl comboBox)
+            {
+                comboBox.DroppedDown = true;
+            }
+        }
+
+        // ComboBoxes mantêm o valor como pendente até perderem o foco por padrão.
+        // O commit imediato dispara CellValueChanged assim que uma opção é escolhida.
+        private void gridSequence_CurrentCellDirtyStateChanged(object sender, EventArgs e)
+        {
+            if (gridSequence.IsCurrentCellDirty
+                && gridSequence.CurrentCell is DataGridViewComboBoxCell)
+            {
+                gridSequence.CommitEdit(DataGridViewDataErrorContexts.Commit);
+            }
         }
 
         // --- PREPARA A CÉLULA PARA EDIÇÃO ---

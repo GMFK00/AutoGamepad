@@ -28,6 +28,24 @@ namespace AutoGamepad.Tests
             Assert.Equal(1, right.Direction);
         }
 
+        [Theory]
+        [InlineData(ActionType.Wait, (int)GamepadControl.A, (int)GamepadControl.None, false)]
+        [InlineData(ActionType.PressAndRelease, (int)GamepadControl.None, (int)GamepadControl.A, true)]
+        [InlineData(ActionType.Hold, (int)GamepadControl.None, (int)GamepadControl.A, true)]
+        [InlineData(ActionType.Release, (int)GamepadControl.B, (int)GamepadControl.B, true)]
+        public void SequenceGridRules_NormalizeControlForSelectedAction(
+            ActionType action,
+            int currentControlValue,
+            int expectedControlValue,
+            bool expectedEditable)
+        {
+            var currentControl = (GamepadControl)currentControlValue;
+            var expectedControl = (GamepadControl)expectedControlValue;
+
+            Assert.Equal(expectedControl, SequenceGridRules.NormalizeControl(action, currentControl));
+            Assert.Equal(expectedEditable, SequenceGridRules.IsControlEditable(action));
+        }
+
         [Fact]
         public async Task RunAsync_UsesSignedValuesForStickDirections()
         {

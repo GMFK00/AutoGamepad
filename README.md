@@ -32,6 +32,7 @@ O funcionamento do software está vinculado à presença do driver de simulaçã
    * `Manter Pressionado (Hold)`: Trava o estado do botão no valor alvo. Avança de linha imediatamente após concluir a rampa de subida.
    * `Soltar (Release)`: Conclui a rampa de descida para a posição neutra e avança.
    * `Pausa (Wait)`: Paralisa o motor no estado atual por um tempo aleatório determinado pelas colunas Min e Max.
+   * A tabela entra em edição com um clique e aplica alterações dos dropdowns imediatamente. Em `Wait`, o botão é definido como vazio e bloqueado; nas demais ações, a opção vazia não é oferecida.
 5. **Execução:** Dispare a automação via botões nativos ou mediante os ganchos locais de atalho do teclado (`Ctrl+Shift+F9` para iniciar e `Ctrl+Shift+F10` para interromper de forma abrupta).
 
 ## Licença e Ética de Uso
