@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using Xunit;
 
 namespace AutoGamepad.Tests
@@ -30,6 +31,7 @@ namespace AutoGamepad.Tests
 
         [Theory]
         [InlineData(ActionType.Wait, (int)GamepadControl.A, (int)GamepadControl.None, false)]
+        [InlineData(ActionType.Log, (int)GamepadControl.A, (int)GamepadControl.None, false)]
         [InlineData(ActionType.PressAndRelease, (int)GamepadControl.None, (int)GamepadControl.A, true)]
         [InlineData(ActionType.Hold, (int)GamepadControl.None, (int)GamepadControl.A, true)]
         [InlineData(ActionType.Release, (int)GamepadControl.B, (int)GamepadControl.B, true)]
@@ -172,6 +174,62 @@ namespace AutoGamepad.Tests
             Assert.Equal(1, output.ResetCount);
         }
 
+        [Fact]
+        public async Task RunAsync_LogMarkerWritesMessageWithoutDelayOrGamepadOutput()
+        {
+            var output = new FakeGamepadOutput();
+            var messages = new ConcurrentQueue<string>();
+            var engine = new AutomationEngine(output, messages.Enqueue);
+            AutomationStep marker = CreateStep(
+                ActionType.Log,
+                GamepadControl.None,
+                durationMinMs: int.MaxValue,
+                durationMaxMs: int.MaxValue,
+                message: "Iniciando movimento lateral");
+
+            await engine.RunAsync(CreateProgram([marker], useCycleLimit: true), CancellationToken.None)
+                .WaitAsync(TimeSpan.FromSeconds(2));
+
+            Assert.Contains(
+                messages,
+                message => message == "[Linha 1] [MARCADOR] Iniciando movimento lateral");
+            Assert.Empty(output.DigitalEvents);
+            Assert.Empty(output.AxisEvents);
+        }
+
+        [Fact]
+        public void SequenceStep_MessageRemainsOptionalForLegacyProfiles()
+        {
+            const string legacyJson = """
+                {
+                  "Action": "Tap",
+                  "Button": "A"
+                }
+                """;
+
+            SequenceStep step = JsonSerializer.Deserialize<SequenceStep>(legacyJson)!;
+            string serialized = JsonSerializer.Serialize(step);
+
+            Assert.Null(step.Message);
+            Assert.DoesNotContain("\"Message\"", serialized, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void SequenceStep_LogMessageRoundTripsThroughJson()
+        {
+            var expected = new SequenceStep
+            {
+                Action = "Log",
+                Button = "None",
+                Message = "Checkpoint carregado"
+            };
+
+            string json = JsonSerializer.Serialize(expected);
+            SequenceStep actual = JsonSerializer.Deserialize<SequenceStep>(json)!;
+
+            Assert.Equal(expected.Message, actual.Message);
+        }
+
         private static AutomationProgram CreateProgram(
             IReadOnlyList<AutomationStep> steps,
             bool useCycleLimit = false)
@@ -189,13 +247,15 @@ namespace AutoGamepad.Tests
             GamepadControl control,
             int valuePercent = 100,
             int durationMinMs = 0,
-            int durationMaxMs = 0)
+            int durationMaxMs = 0,
+            string message = "")
         {
             return new AutomationStep(
                 action,
                 action.ToString(),
                 control,
                 control.ToString(),
+                message,
                 valuePercent,
                 0,
                 0,
@@ -210,6 +270,7 @@ namespace AutoGamepad.Tests
             private readonly ConcurrentDictionary<GamepadControl, bool> _digitalStates = new();
 
             public ConcurrentQueue<(AxisChannel Channel, float Value)> AxisEvents { get; } = new();
+            public ConcurrentQueue<(GamepadControl Control, bool IsPressed)> DigitalEvents { get; } = new();
             public TaskCompletionSource<GamepadControl> DigitalPressed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
             public int ResetCount => _resetCount;
 
@@ -220,6 +281,7 @@ namespace AutoGamepad.Tests
 
             public void SetDigital(GamepadControl control, bool isPressed)
             {
+                DigitalEvents.Enqueue((control, isPressed));
                 _digitalStates[control] = isPressed;
                 if (isPressed)
                 {

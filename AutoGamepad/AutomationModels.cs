@@ -5,7 +5,8 @@ namespace AutoGamepad
         PressAndRelease,
         Hold,
         Release,
-        Wait
+        Wait,
+        Log
     }
 
     internal enum GamepadControl
@@ -117,12 +118,12 @@ namespace AutoGamepad
     {
         public static bool IsControlEditable(ActionType action)
         {
-            return action != ActionType.Wait;
+            return action is not ActionType.Wait and not ActionType.Log;
         }
 
         public static GamepadControl NormalizeControl(ActionType action, GamepadControl control)
         {
-            if (action == ActionType.Wait)
+            if (action is ActionType.Wait or ActionType.Log)
             {
                 return GamepadControl.None;
             }
@@ -176,6 +177,7 @@ namespace AutoGamepad
         string ActionLabel,
         GamepadControl Control,
         string ControlLabel,
+        string Message,
         int ValuePercent,
         int RampMinMs,
         int RampMaxMs,
