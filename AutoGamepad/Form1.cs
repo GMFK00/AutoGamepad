@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using System.Media;
 using System.Runtime.InteropServices;
@@ -21,6 +22,7 @@ namespace AutoGamepad
 
         private const string EMPTY_CONTROL_LABEL = "[Vazio / Apenas Pausa]";
         private const string DEFAULT_CONTROL_LABEL = "Botão A";
+        private const string LOG_ACTION_LABEL = "Mensagem de Log";
 
         // Variáveis de Gestão de Log Seguro (Anti-Memory Leak)
         private const int MAX_LOG_LINES_UI = 500; // Máximo de linhas mostradas na tela preta
@@ -39,7 +41,8 @@ namespace AutoGamepad
             { "Pressionar e Soltar (Tap)", "Tap" },
             { "Manter Pressionado (Hold)", "Hold" },
             { "Soltar Botão/Eixo (Release)", "Release" },
-            { "Pausa (Wait)", "Wait" }
+            { "Pausa (Wait)", "Wait" },
+            { LOG_ACTION_LABEL, "Log" }
         };
 
         // Traduz Botões (Tabela -> JSON)
@@ -242,12 +245,17 @@ namespace AutoGamepad
                 string actionLabel = row.Cells["colAction"].Value?.ToString() ?? "";
                 string controlLabel = row.Cells["colButton"].Value?.ToString() ?? "";
                 string controlJsonId = _buttonToJson.GetValueOrDefault(controlLabel, "None");
+                ActionType action = ParseAction(actionLabel);
+                string message = action == ActionType.Log
+                    ? row.Cells["colMessage"].Value?.ToString()?.Trim() ?? ""
+                    : "";
 
                 steps.Add(new AutomationStep(
-                    ParseAction(actionLabel),
+                    action,
                     actionLabel,
                     GamepadControlCatalog.FromJsonId(controlJsonId),
                     controlLabel,
+                    message,
                     ParseCell(row, "colValue", 100),
                     ParseCell(row, "colRampMin", 0),
                     ParseCell(row, "colRampMax", 0),
@@ -271,6 +279,7 @@ namespace AutoGamepad
                 "Pressionar e Soltar (Tap)" => ActionType.PressAndRelease,
                 "Manter Pressionado (Hold)" => ActionType.Hold,
                 "Soltar Botão/Eixo (Release)" => ActionType.Release,
+                LOG_ACTION_LABEL => ActionType.Log,
                 _ => ActionType.Wait
             };
         }
@@ -304,12 +313,16 @@ namespace AutoGamepad
                 // Lê o nome da tela
                 string rawAction = row.Cells["colAction"].Value?.ToString() ?? "";
                 string rawButton = row.Cells["colButton"].Value?.ToString() ?? "";
+                ActionType action = ParseAction(rawAction);
 
                 var step = new SequenceStep
                 {
                     // Converte pro nome curto usando o Dicionário
                     Action = _actionToJson.ContainsKey(rawAction) ? _actionToJson[rawAction] : "Wait",
                     Button = _buttonToJson.ContainsKey(rawButton) ? _buttonToJson[rawButton] : "None",
+                    Message = action == ActionType.Log
+                        ? row.Cells["colMessage"].Value?.ToString()?.Trim()
+                        : null,
 
                     ValuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100,
                     RampMin = int.TryParse(row.Cells["colRampMin"].Value?.ToString(), out int rMin) ? rMin : 0,
@@ -350,6 +363,12 @@ namespace AutoGamepad
                         if (!isPreview) MessageBox.Show($"Botão/Eixo desconhecido encontrado no arquivo: '{step.Button}'. O perfil não pode ser carregado.", "Arquivo Corrompido", MessageBoxButtons.OK, MessageBoxIcon.Error);
                         return false; // Aborta tudo
                     }
+
+                    if (step.Action == "Log" && string.IsNullOrWhiteSpace(step.Message))
+                    {
+                        if (!isPreview) MessageBox.Show("Uma etapa de log está sem mensagem. O perfil não pode ser carregado.", "Arquivo Corrompido", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        return false;
+                    }
                 }
 
                 // Se passou pelo check de segurança, limpa a tabela para receber os dados
@@ -371,6 +390,7 @@ namespace AutoGamepad
                         // Lê o nome curto do JSON e devolve a frase longa pra Tabela
                         row.Cells["colAction"].Value = GetActionFromJson(step.Action);
                         row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
+                        row.Cells["colMessage"].Value = step.Message ?? "";
 
                         row.Cells["colValue"].Value = step.ValuePercent.ToString();
                         row.Cells["colRampMin"].Value = step.RampMin.ToString();
@@ -419,6 +439,7 @@ namespace AutoGamepad
             tabEditor.Enabled = isIdle;
             btnRowAdd.Enabled = isIdle;
             btnRowInsert.Enabled = isIdle;
+            btnRowInsertLog.Enabled = isIdle;
             btnRowRemove.Enabled = isIdle;
             btnRowUp.Enabled = isIdle;
             btnRowDown.Enabled = isIdle;
@@ -626,6 +647,7 @@ namespace AutoGamepad
             actionColumn.Items.Add("Manter Pressionado (Hold)");
             actionColumn.Items.Add("Soltar Botão/Eixo (Release)");
             actionColumn.Items.Add("Pausa (Wait)");
+            actionColumn.Items.Add(LOG_ACTION_LABEL);
 
             // 2. Pega a coluna "Botão/Eixo" 
             var buttonColumn = (DataGridViewComboBoxColumn)gridSequence.Columns["colButton"]!;
@@ -653,17 +675,46 @@ namespace AutoGamepad
         // --- BOTÃO: INSERIR LINHA ACIMA DA SELEÇÃO ---
         private void btnRowInsert_Click(object sender, EventArgs e)
         {
+            InsertDefaultSequenceRow(GetSequenceInsertionIndex());
+        }
+
+        // --- BOTÃO: INSERIR MARCADOR DE LOG ACIMA DA SELEÇÃO ---
+        private void btnRowInsertLog_Click(object sender, EventArgs e)
+        {
+            DataGridViewRow row = InsertSequenceRow(
+                GetSequenceInsertionIndex(),
+                LOG_ACTION_LABEL,
+                EMPTY_CONTROL_LABEL,
+                "");
+
+            gridSequence.CurrentCell = row.Cells["colMessage"];
+            gridSequence.BeginEdit(selectAll: true);
+        }
+
+        private int GetSequenceInsertionIndex()
+        {
             int? selectedRowIndex = gridSequence.SelectedRows.Count > 0
                 ? gridSequence.SelectedRows[0].Index
                 : null;
-            int insertionIndex = SequenceRowPositionRules.GetInsertionIndex(
+            return SequenceRowPositionRules.GetInsertionIndex(
                 gridSequence.Rows.Count,
                 selectedRowIndex);
-
-            InsertDefaultSequenceRow(insertionIndex);
         }
 
         private void InsertDefaultSequenceRow(int rowIndex)
+        {
+            InsertSequenceRow(
+                rowIndex,
+                "Pressionar e Soltar (Tap)",
+                DEFAULT_CONTROL_LABEL,
+                "");
+        }
+
+        private DataGridViewRow InsertSequenceRow(
+            int rowIndex,
+            string actionLabel,
+            string controlLabel,
+            string message)
         {
             DataGridViewRow row;
 
@@ -680,8 +731,9 @@ namespace AutoGamepad
                 }
 
                 row = gridSequence.Rows[rowIndex];
-                row.Cells["colAction"].Value = "Pressionar e Soltar (Tap)";
-                row.Cells["colButton"].Value = DEFAULT_CONTROL_LABEL;
+                row.Cells["colAction"].Value = actionLabel;
+                row.Cells["colButton"].Value = controlLabel;
+                row.Cells["colMessage"].Value = message;
 
                 // Coloca valores padrão em tudo pra não ficar vazio
                 row.Cells["colValue"].Value = "100";
@@ -700,6 +752,7 @@ namespace AutoGamepad
             SelectSequenceRow(rowIndex);
 
             _sequenceNeedsValidation = true;
+            return row;
         }
 
         // --- BOTÃO: REMOVER LINHA ---
@@ -818,6 +871,7 @@ namespace AutoGamepad
                 string buttonLabel = buttonCell.Value?.ToString() ?? EMPTY_CONTROL_LABEL;
                 bool isAxis = GamepadControlCatalog.TryGetAxisBinding(GetGamepadControl(buttonLabel), out _);
 
+                DataGridViewCell cellMessage = row.Cells["colMessage"];
                 DataGridViewCell cellValue = row.Cells["colValue"];
                 DataGridViewCell cellRampMin = row.Cells["colRampMin"];
                 DataGridViewCell cellRampMax = row.Cells["colRampMax"];
@@ -836,6 +890,7 @@ namespace AutoGamepad
                 switch (action)
                 {
                     case ActionType.Wait:
+                        SetCellState(cellMessage, false);
                         SetCellState(cellValue, false);
                         SetCellState(cellRampMin, false);
                         SetCellState(cellRampMax, false);
@@ -844,7 +899,18 @@ namespace AutoGamepad
                         SetCellState(cellJitter, false);
                         break;
 
+                    case ActionType.Log:
+                        SetCellState(cellMessage, true, "");
+                        SetCellState(cellValue, false);
+                        SetCellState(cellRampMin, false);
+                        SetCellState(cellRampMax, false);
+                        SetCellState(cellTimeMin, false);
+                        SetCellState(cellTimeMax, false);
+                        SetCellState(cellJitter, false);
+                        break;
+
                     case ActionType.PressAndRelease:
+                        SetCellState(cellMessage, false);
                         SetCellState(cellValue, isAxis, "100");
                         SetCellState(cellRampMin, isAxis, "0");
                         SetCellState(cellRampMax, isAxis, "0");
@@ -854,6 +920,7 @@ namespace AutoGamepad
                         break;
 
                     case ActionType.Hold:
+                        SetCellState(cellMessage, false);
                         SetCellState(cellValue, isAxis, "100");
                         SetCellState(cellRampMin, isAxis, "0");
                         SetCellState(cellRampMax, isAxis, "0");
@@ -863,6 +930,7 @@ namespace AutoGamepad
                         break;
 
                     case ActionType.Release:
+                        SetCellState(cellMessage, false);
                         SetCellState(cellValue, false);
                         SetCellState(cellRampMin, isAxis, "0");
                         SetCellState(cellRampMax, isAxis, "0");
@@ -1066,6 +1134,18 @@ namespace AutoGamepad
                 ActionType actionType = ParseAction(action);
                 GamepadControl control = GetGamepadControl(button);
                 bool isAxis = GamepadControlCatalog.TryGetAxisBinding(control, out AxisBinding axisBinding);
+
+                if (actionType == ActionType.Log)
+                {
+                    string message = row.Cells["colMessage"].Value?.ToString() ?? "";
+                    if (string.IsNullOrWhiteSpace(message))
+                    {
+                        MarkRowAsError(row, "A mensagem do marcador de log não pode ficar vazia.");
+                        isValid = false;
+                    }
+
+                    continue;
+                }
 
                 // Checagem de lógica: Soltar um botão que não está pressionado
                 if (actionType == ActionType.Release)
@@ -1402,6 +1482,8 @@ namespace AutoGamepad
     {
         public string Action { get; set; } = "";
         public string Button { get; set; } = "";
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Message { get; set; }
         public int ValuePercent { get; set; }
         public int RampMin { get; set; }
         public int RampMax { get; set; }

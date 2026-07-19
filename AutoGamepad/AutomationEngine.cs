@@ -60,6 +60,12 @@ namespace AutoGamepad
                         token.ThrowIfCancellationRequested();
                         AutomationStep step = program.Steps[index];
 
+                        if (step.Action == ActionType.Log)
+                        {
+                            LogStep(index, step, 0, 0, isAxis: false);
+                            continue;
+                        }
+
                         int rampTime = NextInclusive(step.RampMinMs, step.RampMaxMs);
                         int actionTime = NextInclusive(step.DurationMinMs, step.DurationMaxMs);
                         bool isAxis = GamepadControlCatalog.TryGetAxisBinding(step.Control, out AxisBinding binding);
@@ -108,7 +114,14 @@ namespace AutoGamepad
 
         private void LogStep(int index, AutomationStep step, int rampTime, int actionTime, bool isAxis)
         {
-            if (step.Action == ActionType.Wait)
+            if (step.Action == ActionType.Log)
+            {
+                string message = string.IsNullOrWhiteSpace(step.Message)
+                    ? "(mensagem vazia)"
+                    : step.Message.Trim();
+                _log($"[Linha {index + 1}] [MARCADOR] {message}");
+            }
+            else if (step.Action == ActionType.Wait)
             {
                 _log($"[Linha {index + 1}] ⏳ PAUSA | Duração: {actionTime}ms");
             }

@@ -38,11 +38,13 @@
             btnRowDown = new Button();
             btnRowUp = new Button();
             btnRowRemove = new Button();
+            btnRowInsertLog = new Button();
             btnRowInsert = new Button();
             btnRowAdd = new Button();
             gridSequence = new DataGridView();
             colAction = new DataGridViewComboBoxColumn();
             colButton = new DataGridViewComboBoxColumn();
+            colMessage = new DataGridViewTextBoxColumn();
             colValue = new DataGridViewTextBoxColumn();
             colRampMin = new DataGridViewTextBoxColumn();
             colRampMax = new DataGridViewTextBoxColumn();
@@ -141,6 +143,7 @@
             tabPage1.Controls.Add(btnRowDown);
             tabPage1.Controls.Add(btnRowUp);
             tabPage1.Controls.Add(btnRowRemove);
+            tabPage1.Controls.Add(btnRowInsertLog);
             tabPage1.Controls.Add(btnRowInsert);
             tabPage1.Controls.Add(btnRowAdd);
             tabPage1.Controls.Add(gridSequence);
@@ -155,10 +158,10 @@
             // btnRowDown
             // 
             btnRowDown.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRowDown.Location = new Point(1051, 200);
+            btnRowDown.Location = new Point(1051, 251);
             btnRowDown.Name = "btnRowDown";
             btnRowDown.Size = new Size(119, 43);
-            btnRowDown.TabIndex = 5;
+            btnRowDown.TabIndex = 6;
             btnRowDown.Text = "⬇️ Descer";
             btnRowDown.UseVisualStyleBackColor = true;
             btnRowDown.Click += btnRowDown_Click;
@@ -166,10 +169,10 @@
             // btnRowUp
             // 
             btnRowUp.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRowUp.Location = new Point(1051, 153);
+            btnRowUp.Location = new Point(1051, 202);
             btnRowUp.Name = "btnRowUp";
             btnRowUp.Size = new Size(119, 43);
-            btnRowUp.TabIndex = 4;
+            btnRowUp.TabIndex = 5;
             btnRowUp.Text = "⬆️ Subir";
             btnRowUp.UseVisualStyleBackColor = true;
             btnRowUp.Click += btnRowUp_Click;
@@ -177,13 +180,24 @@
             // btnRowRemove
             // 
             btnRowRemove.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnRowRemove.Location = new Point(1051, 104);
+            btnRowRemove.Location = new Point(1051, 153);
             btnRowRemove.Name = "btnRowRemove";
             btnRowRemove.Size = new Size(119, 43);
-            btnRowRemove.TabIndex = 3;
+            btnRowRemove.TabIndex = 4;
             btnRowRemove.Text = "🗑️ Remover";
             btnRowRemove.UseVisualStyleBackColor = true;
             btnRowRemove.Click += btnRowRemove_Click;
+            //
+            // btnRowInsertLog
+            //
+            btnRowInsertLog.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnRowInsertLog.Location = new Point(1051, 104);
+            btnRowInsertLog.Name = "btnRowInsertLog";
+            btnRowInsertLog.Size = new Size(119, 43);
+            btnRowInsertLog.TabIndex = 3;
+            btnRowInsertLog.Text = "📝 Inserir Log";
+            btnRowInsertLog.UseVisualStyleBackColor = true;
+            btnRowInsertLog.Click += btnRowInsertLog_Click;
             //
             // btnRowInsert
             //
@@ -214,7 +228,7 @@
             gridSequence.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
             gridSequence.AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill;
             gridSequence.ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize;
-            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colValue, colRampMin, colRampMax, colMinTime, colMaxTime, colJitter });
+            gridSequence.Columns.AddRange(new DataGridViewColumn[] { colAction, colButton, colMessage, colValue, colRampMin, colRampMax, colMinTime, colMaxTime, colJitter });
             gridSequence.EditMode = DataGridViewEditMode.EditOnEnter;
             gridSequence.Location = new Point(3, 6);
             gridSequence.MinimumSize = new Size(0, 188);
@@ -243,6 +257,13 @@
             colButton.HeaderText = "Botão/Eixo";
             colButton.MinimumWidth = 6;
             colButton.Name = "colButton";
+            //
+            // colMessage
+            //
+            colMessage.FillWeight = 160F;
+            colMessage.HeaderText = "Mensagem de Log";
+            colMessage.MinimumWidth = 6;
+            colMessage.Name = "colMessage";
             // 
             // colValue
             // 
@@ -447,6 +468,7 @@
         private Button btnRowDown;
         private Button btnRowUp;
         private Button btnRowRemove;
+        private Button btnRowInsertLog;
         private Button btnRowInsert;
         private Button btnRowAdd;
         private RichTextBox txtJsonCode;
@@ -459,6 +481,7 @@
         private NumericUpDown numMaxCycles;
         private DataGridViewComboBoxColumn colAction;
         private DataGridViewComboBoxColumn colButton;
+        private DataGridViewTextBoxColumn colMessage;
         private DataGridViewTextBoxColumn colValue;
         private DataGridViewTextBoxColumn colRampMin;
         private DataGridViewTextBoxColumn colRampMax;

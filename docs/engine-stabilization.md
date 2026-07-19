@@ -76,12 +76,19 @@ Arquivos principais:
 
 A tabela entra em edição no primeiro clique. Células de dropdown abrem a lista imediatamente e confirmam a seleção sem exigir que o usuário clique fora da linha, permitindo que as demais colunas sejam reconfiguradas no mesmo instante.
 
-Cada linha possui sua própria lista de controles. `Wait` seleciona automaticamente `[Vazio / Apenas Pausa]`, bloqueia a célula e oculta o botão do dropdown. `Tap`, `Hold` e `Release` removem a opção vazia; ao sair de `Wait`, a linha recebe `Botão A` como controle padrão.
+Cada linha possui sua própria lista de controles. `Wait` e `Mensagem de Log` selecionam automaticamente `[Vazio / Apenas Pausa]`, bloqueiam a célula e ocultam o botão do dropdown. `Tap`, `Hold` e `Release` removem a opção vazia; ao sair de uma ação sem controle, a linha recebe `Botão A` como controle padrão.
+
+### 9. Marcadores de log
+
+A ação `Mensagem de Log` registra um marcador textual por meio do logger existente. Ela não acessa o controle virtual, ignora os campos de rampa e duração e avança imediatamente para a próxima linha. O botão `Inserir Log` cria o marcador acima da seleção atual e inicia a edição da mensagem.
+
+O identificador JSON da ação é `Log`. A propriedade opcional `Message` é gravada somente para marcadores; etapas de controle continuam sendo exportadas no formato anterior.
 
 ## Compatibilidade
 
-- O esquema JSON e seus identificadores não foram alterados.
-- Perfis existentes continuam sendo importados e exportados.
+- Perfis existentes continuam sendo importados; a ausência de `Message` é aceita normalmente.
+- A propriedade `Message` é omitida nas etapas que não são marcadores, preservando o formato existente desses passos.
+- Perfis que usam a ação `Log` exigem esta versão ou uma posterior. Versões anteriores rejeitam o identificador de ação desconhecido.
 - Perfis legados com `Wait` associado a um controle são normalizados para a opção vazia.
 - Perfis legados com `Tap`, `Hold` ou `Release` associados à opção vazia são normalizados para `Botão A`.
 
@@ -101,7 +108,9 @@ Os testes cobrem:
 - aplicação do sinal correto para esquerda/baixo;
 - sorteio com `int.MaxValue` sem overflow;
 - cancelamento de sequência composta apenas por comandos instantâneos;
-- normalização da opção vazia conforme a ação selecionada na tabela.
+- normalização da opção vazia conforme a ação selecionada na tabela;
+- execução instantânea de marcadores sem saída para o controle virtual;
+- compatibilidade JSON quando a propriedade opcional `Message` está ausente.
 
 ## Roteiro de validação manual
 
@@ -117,3 +126,6 @@ Com o ViGEmBus instalado:
 8. Clique uma vez em uma célula editável e confirme que ela entra imediatamente em edição; nos dropdowns, confirme que a lista é aberta no primeiro clique.
 9. Troque `Tap` por `Hold` e confirme que as colunas de duração são bloqueadas assim que a opção é escolhida, sem clicar fora da célula.
 10. Selecione `Wait` e confirme que o controle muda para a opção vazia e fica bloqueado; retorne para uma ação executável e confirme que `Botão A` é selecionado por padrão.
+11. Selecione uma linha intermediária e clique em `Inserir Log`; confirme que o marcador aparece acima dela e que a coluna de mensagem entra em edição.
+12. Execute uma sequência com marcadores entre comandos e confirme que cada mensagem aparece no log sem introduzir atraso perceptível ou alterar o estado do controle.
+13. Salve e carregue um perfil com marcadores; confirme que as mensagens e suas posições são preservadas. Depois carregue um perfil antigo e confirme que ele continua válido.
