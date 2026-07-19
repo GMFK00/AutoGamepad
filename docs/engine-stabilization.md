@@ -84,6 +84,23 @@ A ação `Mensagem de Log` registra um marcador textual por meio do logger exist
 
 O identificador JSON da ação é `Log`. A propriedade opcional `Message` é gravada somente para marcadores; etapas de controle continuam sendo exportadas no formato anterior.
 
+### 10. Estimativas de tempo
+
+O cálculo de tempo fica em `SequenceTimeEstimator.cs` e não depende de WinForms. A interface fornece um snapshot de `AutomationProgram`, recebe os intervalos calculados e atualiza a coluna `Tempo acumulado` e os labels de ciclo e total.
+
+As durações planejadas são calculadas assim:
+
+- `Wait`: duração mínima e máxima;
+- `Tap` digital: duração mínima e máxima;
+- `Hold` e `Release` digitais: zero;
+- `Tap` em eixo: duas rampas mais a duração;
+- `Hold` e `Release` em eixo: uma rampa;
+- `Mensagem de Log`: zero.
+
+O tempo por ciclo respeita o piso de 16 ms usado pelo motor para sequências totalmente instantâneas. Com limite de ciclos, o intervalo do ciclo é multiplicado pela quantidade configurada; sem limite, a interface mostra `execução contínua`. As estimativas representam o tempo programado e podem ser excedidas pelo agendamento do Windows e pela comunicação com o controle virtual.
+
+A coluna calculada e os labels não fazem parte do JSON. Eles são reconstruídos ao editar, reordenar, inserir, excluir ou importar etapas.
+
 ## Compatibilidade
 
 - Perfis existentes continuam sendo importados; a ausência de `Message` é aceita normalmente.
@@ -110,7 +127,10 @@ Os testes cobrem:
 - cancelamento de sequência composta apenas por comandos instantâneos;
 - normalização da opção vazia conforme a ação selecionada na tabela;
 - execução instantânea de marcadores sem saída para o controle virtual;
-- compatibilidade JSON quando a propriedade opcional `Message` está ausente.
+- compatibilidade JSON quando a propriedade opcional `Message` está ausente;
+- cálculo de todas as combinações entre ações digitais, ações de eixo, rampas e durações;
+- acumulado por etapa, piso mínimo do ciclo, limite de ciclos e execução contínua;
+- aritmética segura para intervalos configurados com `int.MaxValue`.
 
 ## Roteiro de validação manual
 
@@ -129,3 +149,7 @@ Com o ViGEmBus instalado:
 11. Selecione uma linha intermediária e clique em `Inserir Log`; confirme que o marcador aparece acima dela e que a coluna de mensagem entra em edição.
 12. Execute uma sequência com marcadores entre comandos e confirme que cada mensagem aparece no log sem introduzir atraso perceptível ou alterar o estado do controle.
 13. Salve e carregue um perfil com marcadores; confirme que as mensagens e suas posições são preservadas. Depois carregue um perfil antigo e confirme que ele continua válido.
+14. Crie uma sequência com `Wait`, `Tap` digital, `Tap` de eixo, `Hold`, `Release` e marcador; confirme que a coluna acumulada cresce conforme as durações aplicáveis.
+15. Altere rampas, durações, ações, controles e ordem das linhas; confirme que a coluna e os labels são atualizados após cada alteração.
+16. Ative o limite de ciclos e altere a quantidade; confirme que o total é multiplicado. Desative o limite e confirme a mensagem `execução contínua`.
+17. Salve e carregue o perfil; confirme que as estimativas são reconstruídas e que nenhum campo calculado é adicionado ao JSON.

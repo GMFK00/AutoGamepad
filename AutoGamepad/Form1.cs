@@ -19,6 +19,7 @@ namespace AutoGamepad
         private Task? _automationTask;
         private bool _sequenceNeedsValidation = true;
         private bool _isConfiguringSequenceRow;
+        private bool _isUpdatingTimeEstimates;
 
         private const string EMPTY_CONTROL_LABEL = "[Vazio / Apenas Pausa]";
         private const string DEFAULT_CONTROL_LABEL = "Botão A";
@@ -102,6 +103,7 @@ namespace AutoGamepad
 
             // Configura a tabela
             SetupGridColumns();
+            UpdateTimeEstimates();
         }
 
         // --- INTERCEPTADOR DO TECLADO ---
@@ -289,6 +291,118 @@ namespace AutoGamepad
             return int.TryParse(row.Cells[columnName].Value?.ToString(), out int value) ? value : fallback;
         }
 
+        private void UpdateTimeEstimates()
+        {
+            if (_isUpdatingTimeEstimates)
+            {
+                return;
+            }
+
+            _isUpdatingTimeEstimates = true;
+            try
+            {
+                if (gridSequence.Rows.Count == 0)
+                {
+                    lblCycleTimeEstimate.Text = "Por ciclo: sequência vazia";
+                    lblTotalTimeEstimate.Text = "Total: sequência vazia";
+                    return;
+                }
+
+                if (!TryCalculateTimeEstimate(out SequenceTimeEstimate estimate))
+                {
+                    foreach (DataGridViewRow row in gridSequence.Rows)
+                    {
+                        row.Cells["colCumulativeTime"].Value = "—";
+                    }
+
+                    lblCycleTimeEstimate.Text = "Por ciclo: tempo indisponível";
+                    lblTotalTimeEstimate.Text = "Total: tempo indisponível";
+                    return;
+                }
+
+                int estimateIndex = 0;
+                foreach (DataGridViewRow row in gridSequence.Rows)
+                {
+                    if (row.Cells["colAction"].Value == null)
+                    {
+                        row.Cells["colCumulativeTime"].Value = "—";
+                        continue;
+                    }
+
+                    row.Cells["colCumulativeTime"].Value = TimeEstimateFormatter.FormatRange(
+                        estimate.CumulativeDurations[estimateIndex]);
+                    estimateIndex++;
+                }
+
+                lblCycleTimeEstimate.Text = $"Por ciclo: {TimeEstimateFormatter.FormatRange(estimate.CycleDuration)}";
+
+                if (estimate.IsContinuous)
+                {
+                    lblTotalTimeEstimate.Text = "Total: execução contínua";
+                }
+                else
+                {
+                    int cycles = (int)numMaxCycles.Value;
+                    string cycleLabel = cycles == 1 ? "ciclo" : "ciclos";
+                    lblTotalTimeEstimate.Text = $"Total ({cycles} {cycleLabel}): {TimeEstimateFormatter.FormatRange(estimate.TotalDuration!.Value)}";
+                }
+            }
+            finally
+            {
+                _isUpdatingTimeEstimates = false;
+            }
+        }
+
+        private bool TryCalculateTimeEstimate(out SequenceTimeEstimate estimate)
+        {
+            estimate = null!;
+
+            foreach (DataGridViewRow row in gridSequence.Rows)
+            {
+                if (row.Cells["colAction"].Value == null)
+                {
+                    continue;
+                }
+
+                bool validRampMin = TryReadNumericCell(row, "colRampMin", out int rampMin);
+                bool validRampMax = TryReadNumericCell(row, "colRampMax", out int rampMax);
+                bool validDurationMin = TryReadNumericCell(row, "colMinTime", out int durationMin);
+                bool validDurationMax = TryReadNumericCell(row, "colMaxTime", out int durationMax);
+
+                if (!validRampMin
+                    || !validRampMax
+                    || !validDurationMin
+                    || !validDurationMax
+                    || rampMin < 0
+                    || rampMax < 0
+                    || durationMin < 0
+                    || durationMax < 0
+                    || rampMin > rampMax
+                    || durationMin > durationMax)
+                {
+                    return false;
+                }
+            }
+
+            try
+            {
+                estimate = SequenceTimeEstimator.Calculate(CreateAutomationProgram());
+                return true;
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (OverflowException)
+            {
+                return false;
+            }
+        }
+
         private GamepadControl GetGamepadControl(string controlLabel)
         {
             string jsonId = _buttonToJson.GetValueOrDefault(controlLabel, "None");
@@ -408,6 +522,7 @@ namespace AutoGamepad
                 }
 
                 _sequenceNeedsValidation = true;
+                UpdateTimeEstimates();
 
                 // Se não é só um preview, avisa o usuário que importou com sucesso e já roda a validação lógica
                 if (!isPreview)
@@ -752,6 +867,7 @@ namespace AutoGamepad
             SelectSequenceRow(rowIndex);
 
             _sequenceNeedsValidation = true;
+            UpdateTimeEstimates();
             return row;
         }
 
@@ -775,6 +891,7 @@ namespace AutoGamepad
                 MessageBox.Show("Selecione uma linha inteira (clicando na margem esquerda da tabela) para remover.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             _sequenceNeedsValidation = true;
+            UpdateTimeEstimates();
         }
 
         private void SelectSequenceRow(int? rowIndex)
@@ -798,7 +915,7 @@ namespace AutoGamepad
         // --- DETECTA MUDANÇAS DENTRO DA TABELA E BLOQUEIA CÉLULAS ---
         private void gridSequence_CellValueChanged(object sender, DataGridViewCellEventArgs e)
         {
-            if (_isConfiguringSequenceRow || e.RowIndex < 0 || e.ColumnIndex < 0) return;
+            if (_isConfiguringSequenceRow || _isUpdatingTimeEstimates || e.RowIndex < 0 || e.ColumnIndex < 0) return;
 
             string colName = gridSequence.Columns[e.ColumnIndex].Name;
 
@@ -813,6 +930,7 @@ namespace AutoGamepad
             }
 
             _sequenceNeedsValidation = true;
+            UpdateTimeEstimates();
         }
 
         private void ConfigureSequenceRow(DataGridViewRow row, bool configureButtonOptions)
@@ -1100,6 +1218,7 @@ namespace AutoGamepad
             gridSequence.Rows[newIndex].Selected = true;
 
             _sequenceNeedsValidation = true;
+            UpdateTimeEstimates();
         }
 
         // --- VALIDADOR LÓGICO DE SEQUÊNCIA ---
@@ -1316,6 +1435,12 @@ namespace AutoGamepad
         private void chkLimitCycles_CheckedChanged(object sender, EventArgs e)
         {
             numMaxCycles.Enabled = chkLimitCycles.Checked;
+            UpdateTimeEstimates();
+        }
+
+        private void numMaxCycles_ValueChanged(object sender, EventArgs e)
+        {
+            UpdateTimeEstimates();
         }
 
         private void chkEnableJitter_CheckedChanged(object sender, EventArgs e)
