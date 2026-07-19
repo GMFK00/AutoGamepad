@@ -24,12 +24,12 @@ Sequências válidas compostas apenas por ações instantâneas respeitam a dura
 
 Enquanto o motor está ativo, ficam indisponíveis:
 
-- a tabela e suas ações de adicionar, remover e mover linhas;
+- a edição da tabela e suas ações de adicionar, inserir, remover e mover linhas;
 - o editor JSON e suas ações de colar, validar e copiar;
 - salvar e carregar perfis;
 - conexão, limite de ciclos, jitter e som.
 
-O botão Parar permanece disponível. Mesmo que um novo controle de UI deixe de ser bloqueado futuramente, o motor executa um snapshot criado antes do início, nunca a `DataGridView` viva.
+O botão Parar permanece disponível. A tabela continua navegável em modo somente leitura para mostrar a linha em execução e permitir a rolagem. Mesmo que um novo controle de UI deixe de ser bloqueado futuramente, o motor executa um snapshot criado antes do início, nunca a `DataGridView` viva.
 
 ### 4. Estado por eixo físico
 
@@ -101,6 +101,22 @@ O tempo por ciclo respeita o piso de 16 ms usado pelo motor para sequências tot
 
 A coluna calculada e os labels não fazem parte do JSON. Eles são reconstruídos ao editar, reordenar, inserir, excluir ou importar etapas.
 
+### 11. Progresso de execução
+
+O motor publica um `AutomationProgress` sempre que entra em uma etapa. A notificação contém o ciclo atual, o total de ciclos quando limitado, o índice e a quantidade de linhas, além da ação correspondente. O callback é independente de WinForms e não altera o snapshot da automação.
+
+A interface consolida notificações que chegam mais rápido do que a thread gráfica consegue desenhar. Dessa forma, sequências instantâneas exibem sempre a posição mais recente sem acumular uma fila de atualizações. Cada execução recebe um identificador próprio, e notificações atrasadas de uma rodada encerrada são ignoradas.
+
+O label superior apresenta estados como:
+
+```text
+Executando — Ciclo 3 de 10 — Linha 5 de 8
+Finalizado — 10 ciclos concluídos
+Interrompido — Ciclo 3, linha 5
+```
+
+Em execução contínua, o total de ciclos é omitido. A linha atual recebe destaque de seleção, é mantida na área visível e não pode ser substituída por outra seleção enquanto o motor está ativo. Ao concluir, interromper ou falhar, o destaque é removido e a seleção anterior ao início é restaurada quando a linha ainda existe.
+
 ## Compatibilidade
 
 - Perfis existentes continuam sendo importados; a ausência de `Message` é aceita normalmente.
@@ -131,6 +147,8 @@ Os testes cobrem:
 - cálculo de todas as combinações entre ações digitais, ações de eixo, rampas e durações;
 - acumulado por etapa, piso mínimo do ciclo, limite de ciclos e execução contínua;
 - aritmética segura para intervalos configurados com `int.MaxValue`.
+- notificação de ciclo, linha, quantidade de etapas e ação atual pelo motor;
+- formatação dos estados em execução limitada, execução contínua, conclusão, interrupção e falha.
 
 ## Roteiro de validação manual
 
@@ -153,3 +171,6 @@ Com o ViGEmBus instalado:
 15. Altere rampas, durações, ações, controles e ordem das linhas; confirme que a coluna e os labels são atualizados após cada alteração.
 16. Ative o limite de ciclos e altere a quantidade; confirme que o total é multiplicado. Desative o limite e confirme a mensagem `execução contínua`.
 17. Salve e carregue o perfil; confirme que as estimativas são reconstruídas e que nenhum campo calculado é adicionado ao JSON.
+18. Execute uma sequência com pausas longas e confirme que o label mostra ciclo e linha atuais, que a linha ativa fica destacada e que a tabela rola automaticamente quando necessário.
+19. Durante a execução, tente selecionar outra linha e editar a tabela; confirme que o destaque retorna para a etapa ativa e que nenhuma célula pode ser alterada.
+20. Valide término normal, botão Parar e uma falha de execução; confirme que o destaque é removido, a seleção anterior é restaurada e o label mostra o estado final correspondente.

@@ -19,6 +19,38 @@ namespace AutoGamepad.Tests
         }
 
         [Fact]
+        public async Task RunAsync_ReportsCycleLineAndActionProgress()
+        {
+            var updates = new ConcurrentQueue<AutomationProgress>();
+            var engine = new AutomationEngine(
+                new FakeGamepadOutput(),
+                _ => { },
+                progress: updates.Enqueue);
+            AutomationStep first = CreateStep(ActionType.Hold, GamepadControl.A);
+            AutomationStep second = CreateStep(ActionType.Release, GamepadControl.A);
+
+            await engine.RunAsync(
+                CreateProgram([first, second], useCycleLimit: true, maxCycles: 2),
+                CancellationToken.None);
+
+            AutomationProgress[] actual = updates.ToArray();
+            Assert.Equal(4, actual.Length);
+
+            Assert.Equal(1, actual[0].CycleNumber);
+            Assert.Equal(2, actual[0].TotalCycles);
+            Assert.Equal(0, actual[0].StepIndex);
+            Assert.Equal(1, actual[0].LineNumber);
+            Assert.Equal(2, actual[0].StepCount);
+            Assert.Equal(ActionType.Hold, actual[0].Action);
+            Assert.Equal(ActionType.Hold.ToString(), actual[0].ActionLabel);
+
+            Assert.Equal(2, actual[3].CycleNumber);
+            Assert.Equal(1, actual[3].StepIndex);
+            Assert.Equal(2, actual[3].LineNumber);
+            Assert.Equal(ActionType.Release, actual[3].Action);
+        }
+
+        [Fact]
         public void OppositeStickDirections_UseSamePhysicalChannelWithOppositeSigns()
         {
             Assert.True(GamepadControlCatalog.TryGetAxisBinding(GamepadControl.LeftStickLeft, out AxisBinding left));

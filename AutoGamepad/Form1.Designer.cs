@@ -65,6 +65,7 @@
             numJitterFreq = new NumericUpDown();
             lblCycleTimeEstimate = new Label();
             lblTotalTimeEstimate = new Label();
+            lblExecutionStatus = new Label();
             tabEditor.SuspendLayout();
             tabPage1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)gridSequence).BeginInit();
@@ -246,6 +247,7 @@
             gridSequence.CellValueChanged += gridSequence_CellValueChanged;
             gridSequence.CurrentCellDirtyStateChanged += gridSequence_CurrentCellDirtyStateChanged;
             gridSequence.EditingControlShowing += gridSequence_EditingControlShowing;
+            gridSequence.SelectionChanged += gridSequence_SelectionChanged;
             // 
             // colAction
             // 
@@ -459,12 +461,27 @@
             lblTotalTimeEstimate.TabIndex = 27;
             lblTotalTimeEstimate.Text = "Total: sequência vazia";
             lblTotalTimeEstimate.TextAlign = ContentAlignment.MiddleLeft;
+            //
+            // lblExecutionStatus
+            //
+            lblExecutionStatus.Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right;
+            lblExecutionStatus.AutoEllipsis = true;
+            lblExecutionStatus.BackColor = SystemColors.ControlLight;
+            lblExecutionStatus.BorderStyle = BorderStyle.FixedSingle;
+            lblExecutionStatus.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
+            lblExecutionStatus.Location = new Point(620, 8);
+            lblExecutionStatus.Name = "lblExecutionStatus";
+            lblExecutionStatus.Size = new Size(304, 37);
+            lblExecutionStatus.TabIndex = 28;
+            lblExecutionStatus.Text = "Pronto";
+            lblExecutionStatus.TextAlign = ContentAlignment.MiddleCenter;
             // 
             // Form1
             // 
             AutoScaleDimensions = new SizeF(8F, 20F);
             AutoScaleMode = AutoScaleMode.Font;
             ClientSize = new Size(1186, 649);
+            Controls.Add(lblExecutionStatus);
             Controls.Add(lblTotalTimeEstimate);
             Controls.Add(lblCycleTimeEstimate);
             Controls.Add(numJitterFreq);
@@ -528,6 +545,7 @@
         private DataGridViewTextBoxColumn colCumulativeTime;
         private Label lblCycleTimeEstimate;
         private Label lblTotalTimeEstimate;
+        private Label lblExecutionStatus;
         private CheckBox chkEnableJitter;
         private NumericUpDown numJitterFreq;
     }
