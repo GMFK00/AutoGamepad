@@ -4,7 +4,7 @@ O **AutoGamepad** é um motor de automação a nível de hardware projetado para
 
 Este projeto tem como foco a alta precisão na manipulação de eixos (gatilhos e analógicos) e mecanismos de evasão comportamental (*Jitter* contínuo), voltados para ambientes restritivos.
 
-## Arquitetura e Funcionalidades (v1.2.0)
+## Arquitetura e Funcionalidades (v1.3.0)
 
 O AutoGamepad opera como um interpretador de sequência baseada em Máquina de Estados. Antes da execução, a interface converte a tabela em um snapshot imutável; o motor processa esse snapshot em uma thread de trabalho e não acessa controles WinForms durante os ciclos.
 
@@ -54,4 +54,4 @@ O repositório contém testes automatizados para o motor, cancelamento, limites 
 dotnet test AutoGamepad.slnx
 ```
 
-As decisões e o roteiro de validação manual da estabilização do motor estão em [`docs/engine-stabilization.md`](docs/engine-stabilization.md).
+As decisões e o roteiro de validação manual da evolução do motor e do editor estão em [`docs/engine-stabilization.md`](docs/engine-stabilization.md).
