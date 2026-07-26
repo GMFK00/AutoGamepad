@@ -37,10 +37,12 @@ namespace AutoGamepad
         private const int MAX_LOG_LINES_UI = 500; // Máximo de linhas mostradas na tela preta
         private readonly Queue<string> _logUIBuffer = new Queue<string>(MAX_LOG_LINES_UI);
 
-        private readonly List<string> _logDiskBuffer = new List<string>();
-        private const int MAX_LOG_DISK_BUFFER = 50; // Salva no HD a cada 50 mensagens
+        private const int LOG_DISK_FLUSH_THRESHOLD = 50;
+        private const int MAX_PENDING_LOG_LINES = 500;
+        private static readonly TimeSpan LOG_DISK_RETRY_DELAY = TimeSpan.FromSeconds(2);
+        private readonly BoundedLogBuffer _logDiskBuffer;
         private string? _currentLogFilePath = null;
-        private readonly object _logLock = new object(); // Trava de segurança para múltiplas Threads
+        private long _lastReportedDroppedLogLines;
 
         // --- DICIONÁRIOS DE TRADUÇÃO (VISUAL <-> JSON) ---
 
@@ -101,6 +103,11 @@ namespace AutoGamepad
         public Form1()
         {
             InitializeComponent();
+            _logDiskBuffer = new BoundedLogBuffer(
+                LOG_DISK_FLUSH_THRESHOLD,
+                MAX_PENDING_LOG_LINES,
+                LOG_DISK_RETRY_DELAY,
+                WriteLogBatchToDisk);
 
             // Adiciona as Hotkeys: CTRL + SHIFT + F9 | CTRL + SHIFT + F10
             // O operador '|' soma os bits do Control e do Shift
@@ -805,12 +812,21 @@ namespace AutoGamepad
             string formattedMessage = $"[{timestamp}] {message}";
 
             // 1. ATUALIZAÇÃO DA TELA PRETA (RAM)
+            AppendToVisualLog(formattedMessage);
+
+            // 2. GRAVAÇÃO EM DISCO COM FILA LIMITADA E RETRY CONTROLADO
+            LogBufferResult result = _logDiskBuffer.Append(formattedMessage, DateTimeOffset.UtcNow);
+            ReportDiskLogState(result);
+        }
+
+        private void AppendToVisualLog(string formattedMessage)
+        {
             // Usa o Invoke para garantir que as Threads assíncronas do Motor Físico não causem crash na UI
             if (rtbLog != null && !rtbLog.IsDisposed && rtbLog.IsHandleCreated)
             {
                 try
                 {
-                    void AppendToVisualLog()
+                    void AppendLine()
                     {
                         // Se a fila já tem 500 linhas, joga a mais velha fora
                         if (_logUIBuffer.Count >= MAX_LOG_LINES_UI)
@@ -830,11 +846,11 @@ namespace AutoGamepad
 
                     if (rtbLog.InvokeRequired)
                     {
-                        rtbLog.Invoke((Action)AppendToVisualLog);
+                        rtbLog.Invoke((Action)AppendLine);
                     }
                     else
                     {
-                        AppendToVisualLog();
+                        AppendLine();
                     }
                 }
                 catch (InvalidOperationException)
@@ -842,61 +858,71 @@ namespace AutoGamepad
                     // A janela pode estar destruindo o handle durante o encerramento.
                 }
             }
+        }
 
-            // 2. GRAVAÇÃO EM DISCO RÍGIDO (Buffer Batching)
-            // Usamos a trava "lock" porque o C# pode rodar múltiplas coisas ao mesmo tempo e estourar o arquivo
-            lock (_logLock)
+        private void ReportDiskLogState(LogBufferResult result)
+        {
+            if (result.FailureStarted)
             {
-                try
-                {
-                    // Se o caminho do arquivo ainda não foi criado, cria agora!
-                    if (string.IsNullOrEmpty(_currentLogFilePath))
-                    {
-                        // Garante que a pasta "Logs" existe na mesma pasta do .exe
-                        string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
-                        if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
+                AppendVisualNotice(
+                    $"[AVISO] Não foi possível gravar o log em disco. " +
+                    $"Novas tentativas ocorrerão a cada {LOG_DISK_RETRY_DELAY.TotalSeconds:0} segundos; " +
+                    $"a fila está limitada a {MAX_PENDING_LOG_LINES} linhas. Motivo: {result.ErrorMessage}");
+            }
 
-                        // Cria o nome do arquivo com a data e hora de agora
-                        string dateStr = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                        _currentLogFilePath = Path.Combine(logDir, $"AutoGamepad_{dateStr}.log");
-                    }
+            long lastReportedDroppedLines = Interlocked.Read(ref _lastReportedDroppedLogLines);
+            if (result.DroppedLineCount > lastReportedDroppedLines
+                && (lastReportedDroppedLines == 0
+                    || result.DroppedLineCount - lastReportedDroppedLines >= 100)
+                && Interlocked.CompareExchange(
+                    ref _lastReportedDroppedLogLines,
+                    result.DroppedLineCount,
+                    lastReportedDroppedLines) == lastReportedDroppedLines)
+            {
+                AppendVisualNotice(
+                    $"[AVISO] {result.DroppedLineCount} linha(s) de log em disco foram descartadas " +
+                    "para manter o uso de memória limitado.");
+            }
 
-                    _logDiskBuffer.Add(formattedMessage);
-
-                    // Se o pacote de mensagens bateu a cota (50 linhas), despeja no HD e limpa o pacote
-                    if (_logDiskBuffer.Count >= MAX_LOG_DISK_BUFFER)
-                    {
-                        FlushLogToDisk();
-                    }
-                }
-                catch (IOException)
-                {
-                    // O log não pode interromper o motor.
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    // O diretório do executável pode não permitir escrita.
-                }
+            if (result.Recovered)
+            {
+                AppendVisualNotice(
+                    $"[INFO] A gravação do log em disco foi retomada. " +
+                    $"Total descartado durante falhas: {result.DroppedLineCount} linha(s).");
             }
         }
 
-        // Função auxiliar que abre o arquivo de texto, insere o pacote e fecha
+        private void AppendVisualNotice(string message)
+        {
+            string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            AppendToVisualLog($"[{timestamp}] {message}");
+        }
+
+        private void WriteLogBatchToDisk(IReadOnlyList<string> messages)
+        {
+            if (string.IsNullOrEmpty(_currentLogFilePath))
+            {
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localAppData))
+                {
+                    throw new IOException("O Windows não informou uma pasta LocalAppData válida.");
+                }
+
+                string logDirectory = Path.Combine(localAppData, "AutoGamepad", "Logs");
+                Directory.CreateDirectory(logDirectory);
+
+                string date = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss_fff");
+                _currentLogFilePath = Path.Combine(logDirectory, $"AutoGamepad_{date}.log");
+            }
+
+            File.AppendAllLines(_currentLogFilePath, messages);
+        }
+
+        // Tenta gravar o restante mesmo se o logger estiver aguardando o próximo retry.
         private void FlushLogToDisk()
         {
-            lock (_logLock)
-            {
-                if (_logDiskBuffer.Count == 0 || string.IsNullOrEmpty(_currentLogFilePath)) return;
-
-                try
-                {
-                    File.AppendAllLines(_currentLogFilePath, _logDiskBuffer);
-                    _logDiskBuffer.Clear(); // Esvazia o buffer da memória RAM
-                }
-                catch
-                {
-                    // Falha silenciosa para não travar a automação caso o antivírus esteja escaneando o arquivo na hora
-                }
-            }
+            LogBufferResult result = _logDiskBuffer.Flush(DateTimeOffset.UtcNow, force: true);
+            ReportDiskLogState(result);
         }
 
         // Toca um som suave pelo alto-falante do Windows
