@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using System.Media;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -32,6 +31,9 @@ namespace AutoGamepad
         private bool _isSynchronizingJsonEditor;
         private bool _isChangingEditorTab;
         private bool _jsonHasUnappliedChanges;
+        private GlobalHotkeyManager? _globalHotkeys;
+        private bool _shutdownInProgress;
+        private bool _shutdownCompleted;
 
         private const string EMPTY_CONTROL_LABEL = "[Vazio / Apenas Pausa]";
         private const string DEFAULT_CONTROL_LABEL = "Botão A";
@@ -89,13 +91,6 @@ namespace AutoGamepad
             return EMPTY_CONTROL_LABEL; // Fallback seguro
         }
 
-        // --- HOTKEYS GLOBAIS DO WINDOWS ---
-        [DllImport("user32.dll")]
-        private static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
-
-        [DllImport("user32.dll")]
-        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
         // Constantes para as teclas e modificadores
         private const int HOTKEY_ID_START = 1;
         private const int HOTKEY_ID_STOP = 2;
@@ -103,6 +98,8 @@ namespace AutoGamepad
         private const int VK_F10 = 0x79; // F10
         private const int MOD_CONTROL = 0x0002; // Tecla CTRL
         private const int MOD_SHIFT = 0x0004;   // Tecla SHIFT
+        private const int ERROR_HOTKEY_ALREADY_REGISTERED = 1409;
+        private static readonly TimeSpan SHUTDOWN_TIMEOUT = TimeSpan.FromSeconds(5);
 
         public Form1()
         {
@@ -118,18 +115,62 @@ namespace AutoGamepad
                 WriteLogBatchToDisk);
             _profileDocumentState.StateChanged += UpdateWindowTitle;
 
-            // Adiciona as Hotkeys: CTRL + SHIFT + F9 | CTRL + SHIFT + F10
-            // O operador '|' soma os bits do Control e do Shift
-            RegisterHotKey(this.Handle, HOTKEY_ID_START, MOD_CONTROL | MOD_SHIFT, VK_F9);
-            RegisterHotKey(this.Handle, HOTKEY_ID_STOP, MOD_CONTROL | MOD_SHIFT, VK_F10);
-
-            Log("Atalhos globais ativados: [Ctrl+Shift+F9] Iniciar | [Ctrl+Shift+F10] Parar");
+            RegisterGlobalHotkeys();
 
             // Configura a tabela
             SetupGridColumns();
             UpdateJitterFrequencyState();
             UpdateTimeEstimates();
             UpdateWindowTitle();
+        }
+
+        private void RegisterGlobalHotkeys()
+        {
+            _globalHotkeys = new GlobalHotkeyManager(
+                new WindowsGlobalHotkeyRegistrar(),
+                Handle);
+
+            GlobalHotkeyDefinition[] definitions =
+            [
+                new(
+                    HOTKEY_ID_START,
+                    MOD_CONTROL | MOD_SHIFT,
+                    VK_F9,
+                    "Ctrl+Shift+F9 (Iniciar)"),
+                new(
+                    HOTKEY_ID_STOP,
+                    MOD_CONTROL | MOD_SHIFT,
+                    VK_F10,
+                    "Ctrl+Shift+F10 (Parar)")
+            ];
+
+            GlobalHotkeyActivationResult result = _globalHotkeys.Activate(definitions);
+            if (result.IsActive)
+            {
+                Log("Atalhos globais ativados: [Ctrl+Shift+F9] Iniciar | [Ctrl+Shift+F10] Parar");
+                return;
+            }
+
+            string failureDetails = string.Join(
+                Environment.NewLine,
+                result.Failures.Select(failure =>
+                {
+                    string reason = failure.ErrorCode == ERROR_HOTKEY_ALREADY_REGISTERED
+                        ? "já está sendo usado por outro aplicativo"
+                        : $"falhou com o erro do Windows {failure.ErrorCode}";
+                    return $"• {failure.Definition.DisplayName}: {reason}.";
+                }));
+            string warning =
+                "Os atalhos globais não foram ativados. Os botões da janela continuam funcionando.\n\n" +
+                failureDetails;
+
+            Log($"[AVISO] Atalhos globais desativados. {failureDetails.Replace(Environment.NewLine, " ")}");
+            Shown += (_, _) => MessageBox.Show(
+                this,
+                warning,
+                "Atalhos globais indisponíveis",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
         // --- INTERCEPTADOR DO TECLADO ---
@@ -141,11 +182,15 @@ namespace AutoGamepad
             {
                 int id = m.WParam.ToInt32();
 
-                if (id == HOTKEY_ID_START && btnStart.Enabled)
+                if (id == HOTKEY_ID_START
+                    && _globalHotkeys?.IsRegistered(HOTKEY_ID_START) == true
+                    && btnStart.Enabled)
                 {
                     btnStart.PerformClick(); // Simula um clique real no botão "Iniciar"
                 }
-                else if (id == HOTKEY_ID_STOP && btnStop.Enabled)
+                else if (id == HOTKEY_ID_STOP
+                    && _globalHotkeys?.IsRegistered(HOTKEY_ID_STOP) == true
+                    && btnStop.Enabled)
                 {
                     btnStop.PerformClick(); // Simula um clique real no botão "Parar"
                 }
@@ -238,10 +283,14 @@ namespace AutoGamepad
                     _cancellationTokenSource = null;
                 }
                 cancellationSource.Dispose();
-                EndExecutionProgressTracking(executionId);
-                ToggleUI(true);
-                lblExecutionStatus.Text = finalStatus;
-                Log("Ciclo de automação finalizado.");
+
+                if (!_shutdownInProgress && !IsDisposed && !Disposing)
+                {
+                    EndExecutionProgressTracking(executionId);
+                    ToggleUI(true);
+                    lblExecutionStatus.Text = finalStatus;
+                    Log("Ciclo de automação finalizado.");
+                }
             }
         }
 
@@ -967,22 +1016,80 @@ namespace AutoGamepad
             });
         }
 
-        // Evento que ocorre quando o usuário clica no "X" para fechar a janela
-        protected override void OnFormClosing(FormClosingEventArgs e)
+        // Evento que ocorre quando o usuário clica no "X" para fechar a janela.
+        protected override async void OnFormClosing(FormClosingEventArgs e)
         {
-            // Cancela o motor antes de neutralizar e desconectar o dispositivo.
-            _cancellationTokenSource?.Cancel();
+            if (_shutdownCompleted)
+            {
+                base.OnFormClosing(e);
+                return;
+            }
+
+            e.Cancel = true;
+            if (_shutdownInProgress
+                || !ConfirmSaveChanges("fechar o AutoGamepad"))
+            {
+                return;
+            }
+
+            _shutdownInProgress = true;
+            Enabled = false;
+            UseWaitCursor = true;
+
+            try
+            {
+                await ShutdownAsync();
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERRO] Falha inesperada durante o encerramento: {ex.Message}");
+            }
+            finally
+            {
+                _shutdownCompleted = true;
+                _shutdownInProgress = false;
+                UseWaitCursor = false;
+            }
+
+            Close();
+        }
+
+        private async Task ShutdownAsync()
+        {
+            Log("Encerrando o AutoGamepad com segurança...");
+
+            _globalHotkeys?.Dispose();
+            _globalHotkeys = null;
+
+            CancellationTokenSource? cancellationSource = _cancellationTokenSource;
+            Task? automationTask = _automationTask;
+            cancellationSource?.Cancel();
+
+            bool engineCompleted = await ShutdownTaskWaiter.WaitForCompletionAsync(
+                automationTask,
+                SHUTDOWN_TIMEOUT);
+            if (!engineCompleted)
+            {
+                Log(
+                    $"[AVISO] O motor não encerrou em {SHUTDOWN_TIMEOUT.TotalSeconds:0} segundos. " +
+                    "Aplicando neutralização de emergência.");
+            }
+
             TryResetControllerState();
-            DisconnectController();
-
-            // Devolve as teclas pro Windows ao fechar o programa
-            UnregisterHotKey(this.Handle, HOTKEY_ID_START);
-            UnregisterHotKey(this.Handle, HOTKEY_ID_STOP);
-
-            // Salva qualquer mensagem de Log que sobrou perdida na memória.
+            TryDisconnectController();
             FlushLogToDisk();
+        }
 
-            base.OnFormClosing(e);
+        private void TryDisconnectController()
+        {
+            try
+            {
+                DisconnectController();
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERRO] Não foi possível desconectar o controle durante o encerramento: {ex.Message}");
+            }
         }
 
         private void chkConnect_CheckedChanged(object sender, EventArgs e)
