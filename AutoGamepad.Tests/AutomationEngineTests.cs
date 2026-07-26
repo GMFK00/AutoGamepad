@@ -96,6 +96,27 @@ namespace AutoGamepad.Tests
         }
 
         [Theory]
+        [InlineData(ActionType.PressAndRelease, true, true, true, true)]
+        [InlineData(ActionType.Hold, true, true, true, false)]
+        [InlineData(ActionType.Release, true, false, true, false)]
+        [InlineData(ActionType.Wait, false, false, false, true)]
+        [InlineData(ActionType.Log, false, false, false, false)]
+        [InlineData(ActionType.PressAndRelease, false, false, false, true)]
+        [InlineData(ActionType.Hold, false, false, false, false)]
+        [InlineData(ActionType.Release, false, false, false, false)]
+        public void SequenceGridRules_EnablesOnlyNumericFieldsApplicableToAction(
+            ActionType action,
+            bool isAxis,
+            bool expectedAxisValue,
+            bool expectedRamp,
+            bool expectedDuration)
+        {
+            Assert.Equal(expectedAxisValue, SequenceGridRules.IsAxisValueEditable(action, isAxis));
+            Assert.Equal(expectedRamp, SequenceGridRules.IsRampEditable(action, isAxis));
+            Assert.Equal(expectedDuration, SequenceGridRules.IsDurationEditable(action));
+        }
+
+        [Theory]
         [InlineData(0, null, 0)]
         [InlineData(3, null, 3)]
         [InlineData(3, 0, 0)]

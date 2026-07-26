@@ -127,6 +127,23 @@ namespace AutoGamepad
                 && action is ActionType.PressAndRelease or ActionType.Hold or ActionType.Release;
         }
 
+        public static bool IsAxisValueEditable(ActionType action, bool isAxis)
+        {
+            return isAxis
+                && action is ActionType.PressAndRelease or ActionType.Hold;
+        }
+
+        public static bool IsRampEditable(ActionType action, bool isAxis)
+        {
+            return isAxis
+                && action is ActionType.PressAndRelease or ActionType.Hold or ActionType.Release;
+        }
+
+        public static bool IsDurationEditable(ActionType action)
+        {
+            return action is ActionType.PressAndRelease or ActionType.Wait;
+        }
+
         public static GamepadControl NormalizeControl(ActionType action, GamepadControl control)
         {
             if (action is ActionType.Wait or ActionType.Log)

@@ -509,6 +509,8 @@ namespace AutoGamepad
                 string controlLabel = row.Cells["colButton"].Value?.ToString() ?? "";
                 string controlJsonId = _buttonToJson.GetValueOrDefault(controlLabel, "None");
                 ActionType action = ParseAction(actionLabel);
+                GamepadControl control = GamepadControlCatalog.FromJsonId(controlJsonId);
+                bool isAxis = GamepadControlCatalog.TryGetAxisBinding(control, out _);
                 string message = action == ActionType.Log
                     ? row.Cells["colMessage"].Value?.ToString()?.Trim() ?? ""
                     : "";
@@ -516,15 +518,27 @@ namespace AutoGamepad
                 steps.Add(new AutomationStep(
                     action,
                     actionLabel,
-                    GamepadControlCatalog.FromJsonId(controlJsonId),
+                    control,
                     controlLabel,
                     message,
-                    ReadValidatedCell(row, "colValue"),
-                    ReadValidatedCell(row, "colRampMin"),
-                    ReadValidatedCell(row, "colRampMax"),
-                    ReadValidatedCell(row, "colMinTime"),
-                    ReadValidatedCell(row, "colMaxTime"),
-                    ReadValidatedCell(row, "colJitter")));
+                    SequenceGridRules.IsAxisValueEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colValue")
+                        : 0,
+                    SequenceGridRules.IsRampEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colRampMin")
+                        : 0,
+                    SequenceGridRules.IsRampEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colRampMax")
+                        : 0,
+                    SequenceGridRules.IsDurationEditable(action)
+                        ? ReadValidatedCell(row, "colMinTime")
+                        : 0,
+                    SequenceGridRules.IsDurationEditable(action)
+                        ? ReadValidatedCell(row, "colMaxTime")
+                        : 0,
+                    SequenceGridRules.IsJitterEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colJitter")
+                        : 0));
             }
 
             return new AutomationProgram(
@@ -843,6 +857,19 @@ namespace AutoGamepad
             // A tabela permanece visível e navegável para exibir o progresso,
             // mas não pode ser editada enquanto o motor está ativo.
             gridSequence.ReadOnly = !isIdle;
+            if (isIdle)
+            {
+                // Alternar o ReadOnly global de true para false remove as travas
+                // individuais das células. Reaplica as regras de cada tipo de ação.
+                foreach (DataGridViewRow row in gridSequence.Rows)
+                {
+                    if (row.Cells["colAction"].Value != null)
+                    {
+                        ConfigureSequenceRow(row, configureButtonOptions: true);
+                    }
+                }
+            }
+
             txtJsonCode.Enabled = isIdle;
             btnRowAdd.Enabled = isIdle;
             btnRowInsert.Enabled = isIdle;
@@ -1374,6 +1401,9 @@ namespace AutoGamepad
                 DataGridViewCell cellTimeMin = row.Cells["colMinTime"];
                 DataGridViewCell cellTimeMax = row.Cells["colMaxTime"];
                 DataGridViewCell cellJitter = row.Cells["colJitter"];
+                bool isAxisValueEditable = SequenceGridRules.IsAxisValueEditable(action, isAxis);
+                bool isRampEditable = SequenceGridRules.IsRampEditable(action, isAxis);
+                bool isDurationEditable = SequenceGridRules.IsDurationEditable(action);
                 bool isJitterEditable = SequenceGridRules.IsJitterEditable(action, isAxis);
 
                 static void SetCellState(DataGridViewCell cell, bool enabled, string defaultValue = "-")
@@ -1408,31 +1438,31 @@ namespace AutoGamepad
 
                     case ActionType.PressAndRelease:
                         SetCellState(cellMessage, false);
-                        SetCellState(cellValue, isAxis, "100");
-                        SetCellState(cellRampMin, isAxis, "0");
-                        SetCellState(cellRampMax, isAxis, "0");
-                        SetCellState(cellTimeMin, true, "100");
-                        SetCellState(cellTimeMax, true, "100");
+                        SetCellState(cellValue, isAxisValueEditable, "100");
+                        SetCellState(cellRampMin, isRampEditable, "0");
+                        SetCellState(cellRampMax, isRampEditable, "0");
+                        SetCellState(cellTimeMin, isDurationEditable, "100");
+                        SetCellState(cellTimeMax, isDurationEditable, "100");
                         SetCellState(cellJitter, isJitterEditable, "0");
                         break;
 
                     case ActionType.Hold:
                         SetCellState(cellMessage, false);
-                        SetCellState(cellValue, isAxis, "100");
-                        SetCellState(cellRampMin, isAxis, "0");
-                        SetCellState(cellRampMax, isAxis, "0");
-                        SetCellState(cellTimeMin, false);
-                        SetCellState(cellTimeMax, false);
+                        SetCellState(cellValue, isAxisValueEditable, "100");
+                        SetCellState(cellRampMin, isRampEditable, "0");
+                        SetCellState(cellRampMax, isRampEditable, "0");
+                        SetCellState(cellTimeMin, isDurationEditable);
+                        SetCellState(cellTimeMax, isDurationEditable);
                         SetCellState(cellJitter, isJitterEditable, "0");
                         break;
 
                     case ActionType.Release:
                         SetCellState(cellMessage, false);
                         SetCellState(cellValue, false);
-                        SetCellState(cellRampMin, isAxis, "0");
-                        SetCellState(cellRampMax, isAxis, "0");
-                        SetCellState(cellTimeMin, false);
-                        SetCellState(cellTimeMax, false);
+                        SetCellState(cellRampMin, isRampEditable, "0");
+                        SetCellState(cellRampMax, isRampEditable, "0");
+                        SetCellState(cellTimeMin, isDurationEditable);
+                        SetCellState(cellTimeMax, isDurationEditable);
                         SetCellState(cellJitter, isJitterEditable, "0");
                         break;
                 }
@@ -1718,59 +1748,67 @@ namespace AutoGamepad
                     }
                 }
 
-                // O traço representa uma célula desabilitada. Qualquer outro texto precisa caber em Int32.
-                bool validMinTime = TryReadNumericCell(row, "colMinTime", out int minTime);
-                bool validMaxTime = TryReadNumericCell(row, "colMaxTime", out int maxTime);
+                if (SequenceGridRules.IsDurationEditable(actionType))
+                {
+                    bool validMinTime = TryReadNumericCell(row, "colMinTime", out int minTime);
+                    bool validMaxTime = TryReadNumericCell(row, "colMaxTime", out int maxTime);
 
-                if (!validMinTime || !validMaxTime)
-                {
-                    MarkRowAsError(row, "O Tempo de Duração é obrigatório e deve ser um número inteiro válido.");
-                    isValid = false;
-                }
-                else if (minTime < 0 || maxTime < 0)
-                {
-                    MarkRowAsError(row, "O Tempo de Duração não pode ser negativo.");
-                    isValid = false;
-                }
-                else if (minTime > maxTime)
-                {
-                    MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
-                    isValid = false;
-                }
-
-                bool validRampMin = TryReadNumericCell(row, "colRampMin", out int rampMin);
-                bool validRampMax = TryReadNumericCell(row, "colRampMax", out int rampMax);
-
-                if (!validRampMin || !validRampMax)
-                {
-                    MarkRowAsError(row, "O Tempo de Rampa é obrigatório e deve ser um número inteiro válido.");
-                    isValid = false;
-                }
-                else if (rampMin < 0 || rampMax < 0)
-                {
-                    MarkRowAsError(row, "O Tempo de Rampa não pode ser negativo.");
-                    isValid = false;
-                }
-                else if (rampMin > rampMax)
-                {
-                    MarkRowAsError(row, "A Rampa Mínima não pode ser maior que a Rampa Máxima.");
-                    isValid = false;
+                    if (!validMinTime || !validMaxTime)
+                    {
+                        MarkRowAsError(row, "O Tempo de Duração é obrigatório e deve ser um número inteiro válido.");
+                        isValid = false;
+                    }
+                    else if (minTime < 0 || maxTime < 0)
+                    {
+                        MarkRowAsError(row, "O Tempo de Duração não pode ser negativo.");
+                        isValid = false;
+                    }
+                    else if (minTime > maxTime)
+                    {
+                        MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
+                        isValid = false;
+                    }
                 }
 
-                bool validJitter = TryReadNumericCell(row, "colJitter", out int jitterForce);
-                if (!validJitter)
+                if (SequenceGridRules.IsRampEditable(actionType, isAxis))
                 {
-                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) é obrigatório e deve ser um número inteiro válido.");
-                    isValid = false;
+                    bool validRampMin = TryReadNumericCell(row, "colRampMin", out int rampMin);
+                    bool validRampMax = TryReadNumericCell(row, "colRampMax", out int rampMax);
+
+                    if (!validRampMin || !validRampMax)
+                    {
+                        MarkRowAsError(row, "O Tempo de Rampa é obrigatório e deve ser um número inteiro válido.");
+                        isValid = false;
+                    }
+                    else if (rampMin < 0 || rampMax < 0)
+                    {
+                        MarkRowAsError(row, "O Tempo de Rampa não pode ser negativo.");
+                        isValid = false;
+                    }
+                    else if (rampMin > rampMax)
+                    {
+                        MarkRowAsError(row, "A Rampa Mínima não pode ser maior que a Rampa Máxima.");
+                        isValid = false;
+                    }
                 }
-                else if (jitterForce < 0)
+
+                if (SequenceGridRules.IsJitterEditable(actionType, isAxis))
                 {
-                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) não pode ser negativo.");
-                    isValid = false;
+                    bool validJitter = TryReadNumericCell(row, "colJitter", out int jitterForce);
+                    if (!validJitter)
+                    {
+                        MarkRowAsError(row, "O Tremor de Eixo (Jitter) é obrigatório e deve ser um número inteiro válido.");
+                        isValid = false;
+                    }
+                    else if (jitterForce < 0)
+                    {
+                        MarkRowAsError(row, "O Tremor de Eixo (Jitter) não pode ser negativo.");
+                        isValid = false;
+                    }
                 }
 
                 // Tap e Hold de eixo precisam de magnitude explícita entre 1% e 100%.
-                if (isAxis && actionType is ActionType.PressAndRelease or ActionType.Hold)
+                if (SequenceGridRules.IsAxisValueEditable(actionType, isAxis))
                 {
                     bool validAxisValue = TryReadNumericCell(row, "colValue", out int axisValue);
 
