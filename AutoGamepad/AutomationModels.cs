@@ -132,6 +132,26 @@ namespace AutoGamepad
         }
     }
 
+    internal static class SequenceNumericRules
+    {
+        public static bool TryParseRequired(string? text, out int value)
+        {
+            value = 0;
+
+            if (string.IsNullOrWhiteSpace(text) || text.Trim() == "-")
+            {
+                return false;
+            }
+
+            return int.TryParse(text, out value);
+        }
+
+        public static bool IsAxisMagnitudeValid(int value)
+        {
+            return value is >= 1 and <= 100;
+        }
+    }
+
     internal static class SequenceRowPositionRules
     {
         public static int GetInsertionIndex(int rowCount, int? selectedRowIndex)

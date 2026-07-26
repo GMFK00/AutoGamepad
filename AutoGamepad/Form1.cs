@@ -446,12 +446,12 @@ namespace AutoGamepad
                     GamepadControlCatalog.FromJsonId(controlJsonId),
                     controlLabel,
                     message,
-                    ParseCell(row, "colValue", 100),
-                    ParseCell(row, "colRampMin", 0),
-                    ParseCell(row, "colRampMax", 0),
-                    ParseCell(row, "colMinTime", 0),
-                    ParseCell(row, "colMaxTime", 0),
-                    ParseCell(row, "colJitter", 0)));
+                    ReadValidatedCell(row, "colValue"),
+                    ReadValidatedCell(row, "colRampMin"),
+                    ReadValidatedCell(row, "colRampMax"),
+                    ReadValidatedCell(row, "colMinTime"),
+                    ReadValidatedCell(row, "colMaxTime"),
+                    ReadValidatedCell(row, "colJitter")));
             }
 
             return new AutomationProgram(
@@ -474,9 +474,21 @@ namespace AutoGamepad
             };
         }
 
-        private static int ParseCell(DataGridViewRow row, string columnName, int fallback)
+        private static int ReadValidatedCell(DataGridViewRow row, string columnName)
         {
-            return int.TryParse(row.Cells[columnName].Value?.ToString(), out int value) ? value : fallback;
+            DataGridViewCell cell = row.Cells[columnName];
+            if (cell.ReadOnly)
+            {
+                return 0;
+            }
+
+            if (SequenceNumericRules.TryParseRequired(cell.Value?.ToString(), out int value))
+            {
+                return value;
+            }
+
+            throw new InvalidOperationException(
+                $"A célula obrigatória '{columnName}' não contém um número inteiro válido.");
         }
 
         private void UpdateTimeEstimates()
@@ -626,12 +638,12 @@ namespace AutoGamepad
                         ? row.Cells["colMessage"].Value?.ToString()?.Trim()
                         : null,
 
-                    ValuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100,
-                    RampMin = int.TryParse(row.Cells["colRampMin"].Value?.ToString(), out int rMin) ? rMin : 0,
-                    RampMax = int.TryParse(row.Cells["colRampMax"].Value?.ToString(), out int rMax) ? rMax : 0,
-                    WaitMin = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int tMin) ? tMin : 0,
-                    WaitMax = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int tMax) ? tMax : 0,
-                    JitterForce = int.TryParse(row.Cells["colJitter"].Value?.ToString(), out int jf) ? jf : 0
+                    ValuePercent = ReadOptionalProfileCell(row, "colValue"),
+                    RampMin = ReadOptionalProfileCell(row, "colRampMin"),
+                    RampMax = ReadOptionalProfileCell(row, "colRampMax"),
+                    WaitMin = ReadOptionalProfileCell(row, "colMinTime"),
+                    WaitMax = ReadOptionalProfileCell(row, "colMaxTime"),
+                    JitterForce = ReadOptionalProfileCell(row, "colJitter")
                 };
 
                 profile.Steps.Add(step);
@@ -639,6 +651,20 @@ namespace AutoGamepad
 
             var options = new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
             return JsonSerializer.Serialize(profile, options);
+        }
+
+        private static int? ReadOptionalProfileCell(DataGridViewRow row, string columnName)
+        {
+            DataGridViewCell cell = row.Cells[columnName];
+            if (cell.ReadOnly)
+            {
+                // Mantém o formato dos perfis existentes: campos não aplicáveis são exportados como zero.
+                return 0;
+            }
+
+            return SequenceNumericRules.TryParseRequired(cell.Value?.ToString(), out int value)
+                ? value
+                : null;
         }
 
         // --- IMPORTA UMA STRING JSON PARA A TELA ---
@@ -694,12 +720,12 @@ namespace AutoGamepad
                         row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
                         row.Cells["colMessage"].Value = step.Message ?? "";
 
-                        row.Cells["colValue"].Value = step.ValuePercent.ToString();
-                        row.Cells["colRampMin"].Value = step.RampMin.ToString();
-                        row.Cells["colRampMax"].Value = step.RampMax.ToString();
-                        row.Cells["colMinTime"].Value = step.WaitMin.ToString();
-                        row.Cells["colMaxTime"].Value = step.WaitMax.ToString();
-                        row.Cells["colJitter"].Value = step.JitterForce.ToString();
+                        row.Cells["colValue"].Value = step.ValuePercent?.ToString() ?? "";
+                        row.Cells["colRampMin"].Value = step.RampMin?.ToString() ?? "";
+                        row.Cells["colRampMax"].Value = step.RampMax?.ToString() ?? "";
+                        row.Cells["colMinTime"].Value = step.WaitMin?.ToString() ?? "";
+                        row.Cells["colMaxTime"].Value = step.WaitMax?.ToString() ?? "";
+                        row.Cells["colJitter"].Value = step.JitterForce?.ToString() ?? "";
                     }
                     finally
                     {
@@ -1327,10 +1353,21 @@ namespace AutoGamepad
 
             if (colName == "colValue" || colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
             {
+                DataGridViewCell cell = gridSequence.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                if (cell.ReadOnly)
+                {
+                    return;
+                }
+
                 // Pega o valor com segurança contra nulos
                 string newText = e.FormattedValue?.ToString() ?? "";
 
-                if (newText == "-" || newText == "") return;
+                if (string.IsNullOrWhiteSpace(newText) || newText.Trim() == "-")
+                {
+                    e.Cancel = true;
+                    MessageBox.Show("Este campo é obrigatório. Informe um número inteiro.", "Valor Obrigatório", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
 
                 // Tenta converter para número
                 if (!int.TryParse(newText, out int numericValue))
@@ -1340,13 +1377,13 @@ namespace AutoGamepad
                     return; // Para a validação aqui se não for número
                 }
 
-                // REGRA 1: Coluna de Força do Eixo (0 a 100%)
+                // REGRA 1: Coluna de Força do Eixo (1 a 100%)
                 if (colName == "colValue")
                 {
-                    if (numericValue < 0 || numericValue > 100)
+                    if (!SequenceNumericRules.IsAxisMagnitudeValid(numericValue))
                     {
                         e.Cancel = true;
-                        MessageBox.Show("O valor do Eixo/Gatilho deve estar entre 0 e 100%.", "Limite Excedido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        MessageBox.Show("O valor do Eixo/Gatilho deve estar entre 1 e 100%.", "Limite Excedido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
 
@@ -1521,7 +1558,7 @@ namespace AutoGamepad
 
                 if (!validMinTime || !validMaxTime)
                 {
-                    MarkRowAsError(row, "O Tempo de Duração excede o limite numérico permitido.");
+                    MarkRowAsError(row, "O Tempo de Duração é obrigatório e deve ser um número inteiro válido.");
                     isValid = false;
                 }
                 else if (minTime < 0 || maxTime < 0)
@@ -1540,7 +1577,7 @@ namespace AutoGamepad
 
                 if (!validRampMin || !validRampMax)
                 {
-                    MarkRowAsError(row, "O Tempo de Rampa excede o limite numérico permitido.");
+                    MarkRowAsError(row, "O Tempo de Rampa é obrigatório e deve ser um número inteiro válido.");
                     isValid = false;
                 }
                 else if (rampMin < 0 || rampMax < 0)
@@ -1557,7 +1594,7 @@ namespace AutoGamepad
                 bool validJitter = TryReadNumericCell(row, "colJitter", out int jitterForce);
                 if (!validJitter)
                 {
-                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) excede o limite numérico permitido.");
+                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) é obrigatório e deve ser um número inteiro válido.");
                     isValid = false;
                 }
                 else if (jitterForce < 0)
@@ -1566,20 +1603,19 @@ namespace AutoGamepad
                     isValid = false;
                 }
 
-                // Checagem Lógica: Manter eixo em 0% ou maior que 100%
-                if (isAxis)
+                // Tap e Hold de eixo precisam de magnitude explícita entre 1% e 100%.
+                if (isAxis && actionType is ActionType.PressAndRelease or ActionType.Hold)
                 {
                     bool validAxisValue = TryReadNumericCell(row, "colValue", out int axisValue);
 
-                    if (!validAxisValue || axisValue < 0 || axisValue > 100)
+                    if (!validAxisValue)
                     {
-                        MarkRowAsError(row, "O Valor do Eixo deve estar entre 0% e 100%.");
+                        MarkRowAsError(row, "O Valor do Eixo é obrigatório e deve ser um número inteiro.");
                         isValid = false;
                     }
-
-                    if (actionType == ActionType.Hold && axisValue == 0)
+                    else if (!SequenceNumericRules.IsAxisMagnitudeValid(axisValue))
                     {
-                        MarkRowAsError(row, "Manter um Eixo em 0% não tem efeito lógico. Use a ação 'Soltar'.");
+                        MarkRowAsError(row, "O Valor do Eixo deve estar entre 1% e 100%.");
                         isValid = false;
                     }
                 }
@@ -1600,14 +1636,14 @@ namespace AutoGamepad
 
         private static bool TryReadNumericCell(DataGridViewRow row, string columnName, out int value)
         {
-            string text = row.Cells[columnName].Value?.ToString() ?? "";
-            if (string.IsNullOrWhiteSpace(text) || text == "-")
+            DataGridViewCell cell = row.Cells[columnName];
+            if (cell.ReadOnly)
             {
                 value = 0;
                 return true;
             }
 
-            return int.TryParse(text, out value);
+            return SequenceNumericRules.TryParseRequired(cell.Value?.ToString(), out value);
         }
 
         // Pinta a linha de vermelho, coloca o ícone e avisa no Log
@@ -1797,11 +1833,17 @@ namespace AutoGamepad
         public string Button { get; set; } = "";
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Message { get; set; }
-        public int ValuePercent { get; set; }
-        public int RampMin { get; set; }
-        public int RampMax { get; set; }
-        public int WaitMin { get; set; }
-        public int WaitMax { get; set; }
-        public int JitterForce { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? ValuePercent { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? RampMin { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? RampMax { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitMin { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitMax { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? JitterForce { get; set; }
     }
 }

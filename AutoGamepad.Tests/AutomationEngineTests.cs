@@ -246,6 +246,58 @@ namespace AutoGamepad.Tests
             Assert.DoesNotContain("\"Message\"", serialized, StringComparison.Ordinal);
         }
 
+        [Theory]
+        [InlineData(null)]
+        [InlineData("")]
+        [InlineData("   ")]
+        [InlineData("-")]
+        [InlineData("texto")]
+        [InlineData("2147483648")]
+        public void SequenceNumericRules_RejectsMissingOrInvalidRequiredValues(string? text)
+        {
+            Assert.False(SequenceNumericRules.TryParseRequired(text, out _));
+        }
+
+        [Theory]
+        [InlineData("0", 0)]
+        [InlineData("1", 1)]
+        [InlineData("100", 100)]
+        [InlineData("2147483647", int.MaxValue)]
+        public void SequenceNumericRules_ParsesExplicitIntegerValues(string text, int expected)
+        {
+            Assert.True(SequenceNumericRules.TryParseRequired(text, out int actual));
+            Assert.Equal(expected, actual);
+        }
+
+        [Theory]
+        [InlineData(0, false)]
+        [InlineData(1, true)]
+        [InlineData(100, true)]
+        [InlineData(101, false)]
+        public void SequenceNumericRules_RequiresEffectiveAxisMagnitude(int value, bool expected)
+        {
+            Assert.Equal(expected, SequenceNumericRules.IsAxisMagnitudeValid(value));
+        }
+
+        [Fact]
+        public void SequenceStep_MissingNumericValuesRemainAbsentInJson()
+        {
+            const string incompleteJson = """
+                {
+                  "Action": "Tap",
+                  "Button": "LT"
+                }
+                """;
+
+            SequenceStep step = JsonSerializer.Deserialize<SequenceStep>(incompleteJson)!;
+            string serialized = JsonSerializer.Serialize(step);
+
+            Assert.Null(step.ValuePercent);
+            Assert.Null(step.WaitMin);
+            Assert.DoesNotContain("\"ValuePercent\"", serialized, StringComparison.Ordinal);
+            Assert.DoesNotContain("\"WaitMin\"", serialized, StringComparison.Ordinal);
+        }
+
         [Fact]
         public void SequenceStep_LogMessageRoundTripsThroughJson()
         {
