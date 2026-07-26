@@ -28,6 +28,10 @@ namespace AutoGamepad
         private int? _activeExecutionId;
         private int? _selectedRowBeforeExecution;
         private int? _highlightedExecutionRowIndex;
+        private readonly ProfileDocumentState _profileDocumentState = new();
+        private bool _isSynchronizingJsonEditor;
+        private bool _isChangingEditorTab;
+        private bool _jsonHasUnappliedChanges;
 
         private const string EMPTY_CONTROL_LABEL = "[Vazio / Apenas Pausa]";
         private const string DEFAULT_CONTROL_LABEL = "Botão A";
@@ -102,12 +106,17 @@ namespace AutoGamepad
 
         public Form1()
         {
-            InitializeComponent();
+            using (_profileDocumentState.SuppressChangeTracking())
+            {
+                InitializeComponent();
+            }
+
             _logDiskBuffer = new BoundedLogBuffer(
                 LOG_DISK_FLUSH_THRESHOLD,
                 MAX_PENDING_LOG_LINES,
                 LOG_DISK_RETRY_DELAY,
                 WriteLogBatchToDisk);
+            _profileDocumentState.StateChanged += UpdateWindowTitle;
 
             // Adiciona as Hotkeys: CTRL + SHIFT + F9 | CTRL + SHIFT + F10
             // O operador '|' soma os bits do Control e do Shift
@@ -120,6 +129,7 @@ namespace AutoGamepad
             SetupGridColumns();
             UpdateJitterFrequencyState();
             UpdateTimeEstimates();
+            UpdateWindowTitle();
         }
 
         // --- INTERCEPTADOR DO TECLADO ---
@@ -147,6 +157,12 @@ namespace AutoGamepad
         // --- BOTÃO INICIAR ---
         private async void btnStart_Click(object sender, EventArgs e)
         {
+            if (_jsonHasUnappliedChanges
+                && !TryApplyJsonEditorChanges(showResultMessage: false))
+            {
+                return;
+            }
+
             if (_sequenceNeedsValidation)
             {
                 if (!ValidateSequence())
@@ -707,44 +723,49 @@ namespace AutoGamepad
                     }
                 }
 
-                // Se passou pelo check de segurança, limpa a tabela para receber os dados
-                gridSequence.Rows.Clear();
-
-                chkLimitCycles.Checked = profile.UseCycleLimit;
-                numMaxCycles.Value = Math.Max(numMaxCycles.Minimum, Math.Min(numMaxCycles.Maximum, profile.MaxCycles));
-                chkEnableJitter.Checked = profile.EnableGlobalJitter;
-                numJitterFreq.Value = Math.Max(numJitterFreq.Minimum, Math.Min(numJitterFreq.Maximum, profile.JitterFrequencyMs));
-
-                foreach (var step in profile.Steps)
+                // Carregar/aplicar um perfil é uma única alteração lógica. Eventos intermediários
+                // não devem sujar o documento várias vezes nem produzir estado parcialmente visível.
+                using (_profileDocumentState.SuppressChangeTracking())
                 {
-                    int rowIndex = gridSequence.Rows.Add();
-                    var row = gridSequence.Rows[rowIndex];
+                    // Se passou pelo check de segurança, limpa a tabela para receber os dados
+                    gridSequence.Rows.Clear();
 
-                    _isConfiguringSequenceRow = true;
-                    try
+                    chkLimitCycles.Checked = profile.UseCycleLimit;
+                    numMaxCycles.Value = Math.Max(numMaxCycles.Minimum, Math.Min(numMaxCycles.Maximum, profile.MaxCycles));
+                    chkEnableJitter.Checked = profile.EnableGlobalJitter;
+                    numJitterFreq.Value = Math.Max(numJitterFreq.Minimum, Math.Min(numJitterFreq.Maximum, profile.JitterFrequencyMs));
+
+                    foreach (var step in profile.Steps)
                     {
-                        // Lê o nome curto do JSON e devolve a frase longa pra Tabela
-                        row.Cells["colAction"].Value = GetActionFromJson(step.Action);
-                        row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
-                        row.Cells["colMessage"].Value = step.Message ?? "";
+                        int rowIndex = gridSequence.Rows.Add();
+                        var row = gridSequence.Rows[rowIndex];
 
-                        row.Cells["colValue"].Value = step.ValuePercent?.ToString() ?? "";
-                        row.Cells["colRampMin"].Value = step.RampMin?.ToString() ?? "";
-                        row.Cells["colRampMax"].Value = step.RampMax?.ToString() ?? "";
-                        row.Cells["colMinTime"].Value = step.WaitMin?.ToString() ?? "";
-                        row.Cells["colMaxTime"].Value = step.WaitMax?.ToString() ?? "";
-                        row.Cells["colJitter"].Value = step.JitterForce?.ToString() ?? "";
-                    }
-                    finally
-                    {
-                        _isConfiguringSequenceRow = false;
+                        _isConfiguringSequenceRow = true;
+                        try
+                        {
+                            // Lê o nome curto do JSON e devolve a frase longa pra Tabela
+                            row.Cells["colAction"].Value = GetActionFromJson(step.Action);
+                            row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
+                            row.Cells["colMessage"].Value = step.Message ?? "";
+
+                            row.Cells["colValue"].Value = step.ValuePercent?.ToString() ?? "";
+                            row.Cells["colRampMin"].Value = step.RampMin?.ToString() ?? "";
+                            row.Cells["colRampMax"].Value = step.RampMax?.ToString() ?? "";
+                            row.Cells["colMinTime"].Value = step.WaitMin?.ToString() ?? "";
+                            row.Cells["colMaxTime"].Value = step.WaitMax?.ToString() ?? "";
+                            row.Cells["colJitter"].Value = step.JitterForce?.ToString() ?? "";
+                        }
+                        finally
+                        {
+                            _isConfiguringSequenceRow = false;
+                        }
+
+                        ConfigureSequenceRow(row, configureButtonOptions: true);
                     }
 
-                    ConfigureSequenceRow(row, configureButtonOptions: true);
+                    _sequenceNeedsValidation = true;
+                    UpdateTimeEstimates();
                 }
-
-                _sequenceNeedsValidation = true;
-                UpdateTimeEstimates();
 
                 // Se não é só um preview, avisa o usuário que importou com sucesso e já roda a validação lógica
                 if (!isPreview)
@@ -784,6 +805,7 @@ namespace AutoGamepad
             btnJsonValidate.Enabled = isIdle;
             btnJsonCopy.Enabled = isIdle;
             btnSaveProfile.Enabled = isIdle;
+            btnSaveProfileAs.Enabled = isIdle;
             btnLoadProfile.Enabled = isIdle;
 
             // Travas de Ciclo e Som
@@ -1108,12 +1130,15 @@ namespace AutoGamepad
 
             _sequenceNeedsValidation = true;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
             return row;
         }
 
         // --- BOTÃO: REMOVER LINHA ---
         private void btnRowRemove_Click(object sender, EventArgs e)
         {
+            bool removedRow = false;
+
             // Verifica se o usuário selecionou alguma linha
             if (gridSequence.SelectedRows.Count > 0)
             {
@@ -1124,14 +1149,19 @@ namespace AutoGamepad
                     gridSequence.Rows.Count,
                     rowIndex);
                 SelectSequenceRow(selectionIndex);
+                removedRow = true;
             }
             else
             {
                 // Se a pessoa só clicou numa célula e não na linha inteira, avisa ela
                 MessageBox.Show("Selecione uma linha inteira (clicando na margem esquerda da tabela) para remover.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            _sequenceNeedsValidation = true;
-            UpdateTimeEstimates();
+            if (removedRow)
+            {
+                _sequenceNeedsValidation = true;
+                UpdateTimeEstimates();
+                _profileDocumentState.MarkDirty();
+            }
         }
 
         private void SelectSequenceRow(int? rowIndex)
@@ -1171,6 +1201,7 @@ namespace AutoGamepad
 
             _sequenceNeedsValidation = true;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         private void ConfigureSequenceRow(DataGridViewRow row, bool configureButtonOptions)
@@ -1471,6 +1502,7 @@ namespace AutoGamepad
 
             _sequenceNeedsValidation = true;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         // --- VALIDADOR LÓGICO DE SEQUÊNCIA ---
@@ -1687,16 +1719,24 @@ namespace AutoGamepad
         {
             numMaxCycles.Enabled = chkLimitCycles.Checked;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         private void numMaxCycles_ValueChanged(object sender, EventArgs e)
         {
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         private void chkEnableJitter_CheckedChanged(object sender, EventArgs e)
         {
             UpdateJitterFrequencyState();
+            _profileDocumentState.MarkDirty();
+        }
+
+        private void numJitterFreq_ValueChanged(object sender, EventArgs e)
+        {
+            _profileDocumentState.MarkDirty();
         }
 
         private void UpdateJitterFrequencyState()
@@ -1704,22 +1744,107 @@ namespace AutoGamepad
             numJitterFreq.Enabled = chkEnableJitter.Enabled && chkEnableJitter.Checked;
         }
 
+        private bool HasUnsavedProfileChanges =>
+            _profileDocumentState.IsDirty || _jsonHasUnappliedChanges;
+
+        private void UpdateWindowTitle()
+        {
+            string dirtyMarker = HasUnsavedProfileChanges ? " *" : "";
+            Text = $"AutoGamepad — {_profileDocumentState.DisplayName}{dirtyMarker}";
+        }
+
+        private void SetJsonEditorText(string json)
+        {
+            _isSynchronizingJsonEditor = true;
+            try
+            {
+                txtJsonCode.Text = json;
+                _jsonHasUnappliedChanges = false;
+            }
+            finally
+            {
+                _isSynchronizingJsonEditor = false;
+            }
+
+            UpdateWindowTitle();
+        }
+
+        private void txtJsonCode_TextChanged(object sender, EventArgs e)
+        {
+            if (_isSynchronizingJsonEditor)
+            {
+                return;
+            }
+
+            _jsonHasUnappliedChanges = true;
+            UpdateWindowTitle();
+        }
+
         // --- DETECTA MUDANÇA DE ABA (Tabela <-> Código) ---
         private void tabEditor_SelectedIndexChanged(object sender, EventArgs e)
         {
-            // Se o usuário foi para a Aba 1 (Índice 1 = A aba de Código)
-            if (tabEditor.SelectedIndex == 1)
+            if (_isChangingEditorTab)
             {
-                // Verifica se a tabela tem erros matemáticos primeiro
+                return;
+            }
+
+            if (tabEditor.SelectedTab == tabPage2)
+            {
                 if (!ValidateSequence())
                 {
-                    MessageBox.Show("Corrija os erros na tabela antes de visualizar o código.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    tabEditor.SelectedIndex = 0; // Joga ele de volta pra tabela
+                    MessageBox.Show(
+                        "Corrija os erros na tabela antes de visualizar o código.",
+                        "Aviso",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    SelectEditorTab(tabPage1);
                     return;
                 }
 
-                // Tabela OK! Gera o texto JSON e joga na caixa preta
-                txtJsonCode.Text = ExportProfileToJson();
+                SetJsonEditorText(ExportProfileToJson());
+                return;
+            }
+
+            if (tabEditor.SelectedTab == tabPage1 && _jsonHasUnappliedChanges)
+            {
+                DialogResult result = MessageBox.Show(
+                    "O código JSON possui alterações que ainda não foram aplicadas à tabela.\n\n" +
+                    "Sim: aplicar à tabela\n" +
+                    "Não: descartar as alterações do código\n" +
+                    "Cancelar: continuar editando o código",
+                    "Alterações no código JSON",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    if (!TryApplyJsonEditorChanges(showResultMessage: false))
+                    {
+                        SelectEditorTab(tabPage2);
+                    }
+                }
+                else if (result == DialogResult.No)
+                {
+                    _jsonHasUnappliedChanges = false;
+                    UpdateWindowTitle();
+                }
+                else
+                {
+                    SelectEditorTab(tabPage2);
+                }
+            }
+        }
+
+        private void SelectEditorTab(TabPage tabPage)
+        {
+            _isChangingEditorTab = true;
+            try
+            {
+                tabEditor.SelectedTab = tabPage;
+            }
+            finally
+            {
+                _isChangingEditorTab = false;
             }
         }
 
@@ -1745,100 +1870,219 @@ namespace AutoGamepad
         // --- BOTÃO CHECAR SINTAXE (Aba JSON) ---
         private void btnJsonValidate_Click(object sender, EventArgs e)
         {
-            // Tenta importar. Passamos 'true' pois é só um Preview (não queremos o popup de sucesso do import)
-            bool success = ImportProfileFromJson(txtJsonCode.Text, true);
+            TryApplyJsonEditorChanges(showResultMessage: true);
+        }
 
-            if (success)
+        private bool TryApplyJsonEditorChanges(bool showResultMessage)
+        {
+            if (!ImportProfileFromJson(txtJsonCode.Text, isPreview: true))
             {
-                // Se a sintaxe JSON tava certa, roda o validador lógico pra checar os negativos
-                if (!ValidateSequence())
+                MessageBox.Show(
+                    "O JSON é inválido ou contém ações e controles desconhecidos. " +
+                    "A tabela não foi substituída.",
+                    "Erro no JSON",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return false;
+            }
+
+            _jsonHasUnappliedChanges = false;
+            _profileDocumentState.MarkDirty();
+            UpdateWindowTitle();
+
+            bool isValid = ValidateSequence();
+            if (showResultMessage)
+            {
+                if (isValid)
                 {
-                    MessageBox.Show("Sintaxe JSON correta, mas existem ERROS LÓGICOS (Tempo negativo, ordens inválidas). Corrija na Tabela Visual.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(
+                        "Sintaxe JSON e lógica válidas. A tabela visual foi atualizada.",
+                        "Validado",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MessageBox.Show("Sintaxe JSON e Lógica Perfeitas! A tabela visual foi atualizada.", "Validado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(
+                        "A sintaxe JSON está correta, mas existem erros lógicos ou campos obrigatórios inválidos. " +
+                        "Corrija as linhas marcadas na tabela.",
+                        "Aviso",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
                 }
             }
-            else
+
+            return true;
+        }
+
+        // --- BOTÕES SALVAR / SALVAR COMO ---
+        private void btnSaveProfile_Click(object sender, EventArgs e)
+        {
+            SaveCurrentProfile();
+        }
+
+        private void btnSaveProfileAs_Click(object sender, EventArgs e)
+        {
+            SaveProfileAs();
+        }
+
+        private bool SaveCurrentProfile()
+        {
+            return string.IsNullOrEmpty(_profileDocumentState.FilePath)
+                ? SaveProfileAs()
+                : SaveProfileToPath(_profileDocumentState.FilePath);
+        }
+
+        private bool SaveProfileAs()
+        {
+            using var dialog = new SaveFileDialog
             {
-                MessageBox.Show("Erro de Sintaxe no JSON! Verifique se você não apagou vírgulas ou chaves '{}'.", "Erro Fatal", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json",
+                Title = "Salvar Perfil de Automação como",
+                AddExtension = true,
+                DefaultExt = "json",
+                FileName = string.IsNullOrEmpty(_profileDocumentState.FilePath)
+                    ? "MeuPerfil.json"
+                    : Path.GetFileName(_profileDocumentState.FilePath)
+            };
+
+            if (!string.IsNullOrEmpty(_profileDocumentState.FilePath))
+            {
+                dialog.InitialDirectory = Path.GetDirectoryName(_profileDocumentState.FilePath);
+            }
+
+            return dialog.ShowDialog() == DialogResult.OK
+                && SaveProfileToPath(dialog.FileName);
+        }
+
+        private bool SaveProfileToPath(string filePath)
+        {
+            if (!TryCreateProfileJsonForSave(out string jsonContent))
+            {
+                return false;
+            }
+
+            try
+            {
+                ProfileFileWriter.WriteAllTextSafely(filePath, jsonContent);
+                SetJsonEditorText(jsonContent);
+                _profileDocumentState.MarkSaved(filePath);
+                MessageBox.Show(
+                    "Perfil salvo com sucesso!",
+                    "Sucesso",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Não foi possível salvar o perfil. O arquivo anterior foi preservado.\n\n{ex.Message}",
+                    "Erro de Gravação",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return false;
             }
         }
 
-        // --- BOTÃO: SALVAR PERFIL (GERA O ARQUIVO .JSON) ---
-        private void btnSaveProfile_Click(object sender, EventArgs e)
+        private bool TryCreateProfileJsonForSave(out string jsonContent)
         {
-            // Roda o validador lógico primeiro (Avisa o usuário, mas não o impede de salvar com erros)
+            jsonContent = "";
+
+            if (_jsonHasUnappliedChanges
+                && !TryApplyJsonEditorChanges(showResultMessage: false))
+            {
+                return false;
+            }
+
             if (!ValidateSequence())
             {
-                var dialogResult = MessageBox.Show("Sua sequência possui ERROS LÓGICOS (linhas vermelhas). Se salvar assim, não será possível iniciar a automação depois.\n\nDeseja salvar o arquivo mesmo assim?", "Aviso de Validação", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                DialogResult result = MessageBox.Show(
+                    "Sua sequência possui erros e não poderá ser executada enquanto eles existirem.\n\n" +
+                    "Deseja salvar o arquivo mesmo assim?",
+                    "Aviso de Validação",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
 
-                if (dialogResult == DialogResult.No) return; // O cara desistiu de salvar
-            }
-
-            // Pega o texto da tabela convertido em JSON
-            string jsonContent = ExportProfileToJson();
-
-            // Abre a janela do Windows para salvar o arquivo
-            using (SaveFileDialog sfd = new SaveFileDialog())
-            {
-                sfd.Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json";
-                sfd.Title = "Salvar Perfil de Automação";
-                sfd.FileName = "MeuPerfil.json"; // Sugestão de nome
-
-                if (sfd.ShowDialog() == DialogResult.OK)
+                if (result != DialogResult.Yes)
                 {
-                    try
-                    {
-                        // Escreve o texto gerado no arquivo escolhido
-                        File.WriteAllText(sfd.FileName, jsonContent);
-                        MessageBox.Show("Perfil salvo com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Erro ao tentar salvar o arquivo: {ex.Message}", "Erro de Gravação", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    return false;
                 }
             }
+
+            jsonContent = ExportProfileToJson();
+            return true;
+        }
+
+        private bool ConfirmSaveChanges(string operation)
+        {
+            if (!HasUnsavedProfileChanges)
+            {
+                return true;
+            }
+
+            DialogResult result = MessageBox.Show(
+                $"Existem alterações não salvas em '{_profileDocumentState.DisplayName}'.\n\n" +
+                $"Deseja salvá-las antes de {operation}?",
+                "Alterações não salvas",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning);
+
+            return result switch
+            {
+                DialogResult.Yes => SaveCurrentProfile(),
+                DialogResult.No => true,
+                _ => false
+            };
         }
 
         // --- BOTÃO: CARREGAR PERFIL (LÊ O ARQUIVO .JSON) ---
         private void btnLoadProfile_Click(object sender, EventArgs e)
         {
-            // Abre a janela do Windows para buscar o arquivo
-            using (OpenFileDialog ofd = new OpenFileDialog())
+            using var dialog = new OpenFileDialog
             {
-                ofd.Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json";
-                ofd.Title = "Carregar Perfil de Automação";
+                Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json",
+                Title = "Carregar Perfil de Automação"
+            };
 
-                if (ofd.ShowDialog() == DialogResult.OK)
+            if (dialog.ShowDialog() != DialogResult.OK
+                || !ConfirmSaveChanges("abrir outro perfil"))
+            {
+                return;
+            }
+
+            try
+            {
+                string jsonContent = File.ReadAllText(dialog.FileName);
+                bool success = ImportProfileFromJson(jsonContent, isPreview: false);
+
+                if (success)
                 {
-                    try
-                    {
-                        // Lê o texto do arquivo
-                        string jsonContent = File.ReadAllText(ofd.FileName);
-
-                        // Tenta jogar pra tabela usando a função que já fizemos
-                        // Passamos 'false' pra avisar que é um import real, assim ele roda a validação pesada
-                        bool success = ImportProfileFromJson(jsonContent, false);
-
-                        if (success)
-                        {
-                            // Joga o texto lido na aba Código também para sincronizar a tela
-                            txtJsonCode.Text = jsonContent;
-                            MessageBox.Show("Perfil carregado com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        }
-                        else
-                        {
-                            MessageBox.Show("O arquivo selecionado está corrompido ou possui formatação JSON inválida. O Perfil não pôde ser carregado.", "Erro Crítico", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Erro ao tentar abrir o arquivo: {ex.Message}", "Erro de Leitura", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    SetJsonEditorText(jsonContent);
+                    _profileDocumentState.MarkSaved(dialog.FileName);
+                    MessageBox.Show(
+                        "Perfil carregado com sucesso!",
+                        "Sucesso",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
                 }
+                else
+                {
+                    MessageBox.Show(
+                        "O arquivo selecionado está corrompido, possui JSON inválido ou contém valores desconhecidos. " +
+                        "O perfil não pôde ser carregado.",
+                        "Erro Crítico",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Erro ao tentar abrir o arquivo: {ex.Message}",
+                    "Erro de Leitura",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
     }
