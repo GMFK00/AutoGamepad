@@ -81,6 +81,21 @@ namespace AutoGamepad.Tests
         }
 
         [Theory]
+        [InlineData(ActionType.PressAndRelease, true, true)]
+        [InlineData(ActionType.Hold, true, true)]
+        [InlineData(ActionType.Release, true, true)]
+        [InlineData(ActionType.Wait, true, false)]
+        [InlineData(ActionType.Log, true, false)]
+        [InlineData(ActionType.PressAndRelease, false, false)]
+        public void SequenceGridRules_EnablesJitterForEveryAxisRamp(
+            ActionType action,
+            bool isAxis,
+            bool expected)
+        {
+            Assert.Equal(expected, SequenceGridRules.IsJitterEditable(action, isAxis));
+        }
+
+        [Theory]
         [InlineData(0, null, 0)]
         [InlineData(3, null, 3)]
         [InlineData(3, 0, 0)]
@@ -125,6 +140,95 @@ namespace AutoGamepad.Tests
 
             Assert.Contains((AxisChannel.LeftStickX, -100f), output.AxisEvents);
             Assert.Equal((AxisChannel.LeftStickX, 0f), output.AxisEvents.Last());
+        }
+
+        [Fact]
+        public async Task RunAsync_HoldKeepsAxisJitterActiveDuringWait()
+        {
+            var output = new FakeGamepadOutput();
+            var engine = new AutomationEngine(output, _ => { }, new MaximumRandom());
+            AutomationStep hold = CreateStep(
+                ActionType.Hold,
+                GamepadControl.LeftTrigger,
+                valuePercent: 50,
+                jitterForcePercent: 10);
+            AutomationStep wait = CreateStep(
+                ActionType.Wait,
+                GamepadControl.None,
+                durationMinMs: 60,
+                durationMaxMs: 60);
+            AutomationStep release = CreateStep(ActionType.Release, GamepadControl.LeftTrigger);
+
+            await engine.RunAsync(
+                CreateProgram(
+                    [hold, wait, release],
+                    useCycleLimit: true,
+                    enableJitter: true,
+                    jitterFrequencyMs: 5),
+                CancellationToken.None);
+
+            Assert.True(output.AxisEvents.Count(value =>
+                value == (AxisChannel.LeftTrigger, 60f)) >= 2);
+            Assert.Equal((AxisChannel.LeftTrigger, 0f), output.AxisEvents.Last());
+        }
+
+        [Fact]
+        public async Task RunAsync_AxisTapAppliesJitterToDescendingRamp()
+        {
+            var output = new FakeGamepadOutput();
+            var engine = new AutomationEngine(output, _ => { }, new MaximumRandom());
+            AutomationStep tap = CreateStep(
+                ActionType.PressAndRelease,
+                GamepadControl.LeftTrigger,
+                valuePercent: 50,
+                rampMinMs: 40,
+                rampMaxMs: 40,
+                jitterForcePercent: 10);
+
+            await engine.RunAsync(
+                CreateProgram(
+                    [tap],
+                    useCycleLimit: true,
+                    enableJitter: true,
+                    jitterFrequencyMs: 1),
+                CancellationToken.None);
+
+            Assert.Contains(
+                output.AxisEvents.Zip(output.AxisEvents.Skip(1)),
+                pair => pair.First == (AxisChannel.LeftTrigger, 50f)
+                    && pair.Second == (AxisChannel.LeftTrigger, 60f));
+            Assert.Equal((AxisChannel.LeftTrigger, 0f), output.AxisEvents.Last());
+        }
+
+        [Fact]
+        public async Task RunAsync_AxisReleaseUsesItsOwnJitter()
+        {
+            var output = new FakeGamepadOutput();
+            var engine = new AutomationEngine(output, _ => { }, new MaximumRandom());
+            AutomationStep hold = CreateStep(
+                ActionType.Hold,
+                GamepadControl.LeftTrigger,
+                valuePercent: 50);
+            AutomationStep release = CreateStep(
+                ActionType.Release,
+                GamepadControl.LeftTrigger,
+                rampMinMs: 40,
+                rampMaxMs: 40,
+                jitterForcePercent: 10);
+
+            await engine.RunAsync(
+                CreateProgram(
+                    [hold, release],
+                    useCycleLimit: true,
+                    enableJitter: true,
+                    jitterFrequencyMs: 1),
+                CancellationToken.None);
+
+            Assert.Contains(
+                output.AxisEvents.Zip(output.AxisEvents.Skip(1)),
+                pair => pair.First == (AxisChannel.LeftTrigger, 50f)
+                    && pair.Second == (AxisChannel.LeftTrigger, 60f));
+            Assert.Equal((AxisChannel.LeftTrigger, 0f), output.AxisEvents.Last());
         }
 
         [Fact]
@@ -441,13 +545,15 @@ namespace AutoGamepad.Tests
         private static AutomationProgram CreateProgram(
             IReadOnlyList<AutomationStep> steps,
             bool useCycleLimit = false,
-            int maxCycles = 1)
+            int maxCycles = 1,
+            bool enableJitter = false,
+            int jitterFrequencyMs = 100)
         {
             return new AutomationProgram(
                 useCycleLimit,
                 maxCycles,
-                false,
-                100,
+                enableJitter,
+                jitterFrequencyMs,
                 steps);
         }
 
@@ -459,7 +565,8 @@ namespace AutoGamepad.Tests
             int rampMaxMs = 0,
             int durationMinMs = 0,
             int durationMaxMs = 0,
-            string message = "")
+            string message = "",
+            int jitterForcePercent = 0)
         {
             return new AutomationStep(
                 action,
@@ -472,7 +579,7 @@ namespace AutoGamepad.Tests
                 rampMaxMs,
                 durationMinMs,
                 durationMaxMs,
-                0);
+                jitterForcePercent);
         }
 
         private sealed class FakeGamepadOutput : IGamepadOutput
@@ -513,6 +620,14 @@ namespace AutoGamepad.Tests
                 }
 
                 Interlocked.Increment(ref _resetCount);
+            }
+        }
+
+        private sealed class MaximumRandom : Random
+        {
+            public override long NextInt64(long minValue, long maxValue)
+            {
+                return maxValue - 1;
             }
         }
     }

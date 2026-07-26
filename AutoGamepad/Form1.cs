@@ -118,6 +118,7 @@ namespace AutoGamepad
 
             // Configura a tabela
             SetupGridColumns();
+            UpdateJitterFrequencyState();
             UpdateTimeEstimates();
         }
 
@@ -794,8 +795,7 @@ namespace AutoGamepad
 
             // --- Travas do Jitter Global ---
             chkEnableJitter.Enabled = isIdle;
-            // Só libera a frequência se estiver em Idle E o checkbox de tremor estiver marcado
-            numJitterFreq.Enabled = isIdle && chkEnableJitter.Checked;
+            UpdateJitterFrequencyState();
         }
 
         private void ClearVisualLog()
@@ -1236,6 +1236,7 @@ namespace AutoGamepad
                 DataGridViewCell cellTimeMin = row.Cells["colMinTime"];
                 DataGridViewCell cellTimeMax = row.Cells["colMaxTime"];
                 DataGridViewCell cellJitter = row.Cells["colJitter"];
+                bool isJitterEditable = SequenceGridRules.IsJitterEditable(action, isAxis);
 
                 static void SetCellState(DataGridViewCell cell, bool enabled, string defaultValue = "-")
                 {
@@ -1274,7 +1275,7 @@ namespace AutoGamepad
                         SetCellState(cellRampMax, isAxis, "0");
                         SetCellState(cellTimeMin, true, "100");
                         SetCellState(cellTimeMax, true, "100");
-                        SetCellState(cellJitter, isAxis, "0");
+                        SetCellState(cellJitter, isJitterEditable, "0");
                         break;
 
                     case ActionType.Hold:
@@ -1284,7 +1285,7 @@ namespace AutoGamepad
                         SetCellState(cellRampMax, isAxis, "0");
                         SetCellState(cellTimeMin, false);
                         SetCellState(cellTimeMax, false);
-                        SetCellState(cellJitter, isAxis, "0");
+                        SetCellState(cellJitter, isJitterEditable, "0");
                         break;
 
                     case ActionType.Release:
@@ -1294,7 +1295,7 @@ namespace AutoGamepad
                         SetCellState(cellRampMax, isAxis, "0");
                         SetCellState(cellTimeMin, false);
                         SetCellState(cellTimeMax, false);
-                        SetCellState(cellJitter, false);
+                        SetCellState(cellJitter, isJitterEditable, "0");
                         break;
                 }
             }
@@ -1695,8 +1696,12 @@ namespace AutoGamepad
 
         private void chkEnableJitter_CheckedChanged(object sender, EventArgs e)
         {
-            // Ativa ou desativa a caixa de Frequência quando o usuário marca/desmarca o Jitter
-            numJitterFreq.Enabled = chkEnableJitter.Checked;
+            UpdateJitterFrequencyState();
+        }
+
+        private void UpdateJitterFrequencyState()
+        {
+            numJitterFreq.Enabled = chkEnableJitter.Enabled && chkEnableJitter.Checked;
         }
 
         // --- DETECTA MUDANÇA DE ABA (Tabela <-> Código) ---

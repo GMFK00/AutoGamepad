@@ -121,6 +121,12 @@ namespace AutoGamepad
             return action is not ActionType.Wait and not ActionType.Log;
         }
 
+        public static bool IsJitterEditable(ActionType action, bool isAxis)
+        {
+            return isAxis
+                && action is ActionType.PressAndRelease or ActionType.Hold or ActionType.Release;
+        }
+
         public static GamepadControl NormalizeControl(ActionType action, GamepadControl control)
         {
             if (action is ActionType.Wait or ActionType.Log)
