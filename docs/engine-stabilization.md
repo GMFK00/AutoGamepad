@@ -232,3 +232,4 @@ Com o ViGEmBus instalado:
 29. Abra duas instâncias. Confirme que a segunda informa o conflito das hotkeys e que seus botões continuam funcionando; feche a primeira e reinicie a segunda para confirmar o registro normal.
 30. Inicie uma espera longa e feche a janela. Confirme que o aplicativo cancela, aguarda e que todos os botões/eixos ficam neutros antes do dispositivo virtual desaparecer.
 31. Para testar falha de log, negue temporariamente escrita em `%LocalAppData%\AutoGamepad\Logs`, produza mais de 500 mensagens e confirme que a memória permanece limitada e aparece aviso de descarte. Restaure a permissão, aguarde dois segundos, produza outra mensagem e confirme o aviso de recuperação.
+32. Execute e finalize ou interrompa uma sequência que contenha `Wait`; edite qualquer campo e inicie novamente. Confirme que rampa e jitter da pausa continuam bloqueados e que o validador não os trata como obrigatórios.
