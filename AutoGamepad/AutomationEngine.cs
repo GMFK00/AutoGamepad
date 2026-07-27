@@ -18,6 +18,7 @@ namespace AutoGamepad
         private readonly Action<AutomationProgress>? _progress;
         private readonly Random _random;
         private readonly Dictionary<AxisChannel, float> _axisStates = new();
+        private readonly Dictionary<AxisChannel, HeldAxisJitterState> _heldAxisJitterStates = new();
 
         public AutomationEngine(
             IGamepadOutput output,
@@ -41,6 +42,7 @@ namespace AutoGamepad
             }
 
             _axisStates.Clear();
+            _heldAxisJitterStates.Clear();
 
             try
             {
@@ -86,7 +88,7 @@ namespace AutoGamepad
 
                         if (step.Action == ActionType.Wait)
                         {
-                            await DelayAsync(actionTime, token).ConfigureAwait(false);
+                            await DelayWithHeldAxisJitterAsync(program, actionTime, token).ConfigureAwait(false);
                             continue;
                         }
 
@@ -96,7 +98,7 @@ namespace AutoGamepad
                         }
                         else
                         {
-                            await ExecuteDigitalStepAsync(step, actionTime, token).ConfigureAwait(false);
+                            await ExecuteDigitalStepAsync(program, step, actionTime, token).ConfigureAwait(false);
                         }
                     }
 
@@ -106,13 +108,17 @@ namespace AutoGamepad
                     long remainingCycleTime = SequenceTimeEstimator.MinimumCycleDurationMs - cycleTimer.ElapsedMilliseconds;
                     if (remainingCycleTime > 0)
                     {
-                        await Task.Delay((int)remainingCycleTime, token).ConfigureAwait(false);
+                        await DelayWithHeldAxisJitterAsync(
+                            program,
+                            (int)remainingCycleTime,
+                            token).ConfigureAwait(false);
                     }
                 }
             }
             finally
             {
                 _axisStates.Clear();
+                _heldAxisJitterStates.Clear();
                 try
                 {
                     _output.Reset();
@@ -147,13 +153,17 @@ namespace AutoGamepad
             }
         }
 
-        private async Task ExecuteDigitalStepAsync(AutomationStep step, int actionTime, CancellationToken token)
+        private async Task ExecuteDigitalStepAsync(
+            AutomationProgram program,
+            AutomationStep step,
+            int actionTime,
+            CancellationToken token)
         {
             switch (step.Action)
             {
                 case ActionType.PressAndRelease:
                     _output.SetDigital(step.Control, true);
-                    await DelayAsync(actionTime, token).ConfigureAwait(false);
+                    await DelayWithHeldAxisJitterAsync(program, actionTime, token).ConfigureAwait(false);
                     _output.SetDigital(step.Control, false);
                     break;
 
@@ -179,15 +189,17 @@ namespace AutoGamepad
             {
                 case ActionType.PressAndRelease:
                     await MoveAxisAsync(program, binding, step.ValuePercent, rampTime, actionTime, step.JitterForcePercent, token).ConfigureAwait(false);
-                    await MoveAxisAsync(program, binding, 0, rampTime, 0, 0, token).ConfigureAwait(false);
+                    await MoveAxisAsync(program, binding, 0, rampTime, 0, step.JitterForcePercent, token).ConfigureAwait(false);
                     break;
 
                 case ActionType.Hold:
                     await MoveAxisAsync(program, binding, step.ValuePercent, rampTime, 0, step.JitterForcePercent, token).ConfigureAwait(false);
+                    RegisterHeldAxisJitter(program, binding, step.ValuePercent, step.JitterForcePercent);
                     break;
 
                 case ActionType.Release:
-                    await MoveAxisAsync(program, binding, 0, rampTime, 0, 0, token).ConfigureAwait(false);
+                    _heldAxisJitterStates.Remove(binding.Channel);
+                    await MoveAxisAsync(program, binding, 0, rampTime, 0, step.JitterForcePercent, token).ConfigureAwait(false);
                     break;
             }
         }
@@ -211,7 +223,11 @@ namespace AutoGamepad
             {
                 _output.SetAxis(binding.Channel, targetValue);
                 _axisStates[binding.Channel] = targetValue;
-                await DelayAsync(holdTime, token).ConfigureAwait(false);
+                await DelayWithHeldAxisJitterAsync(
+                    program,
+                    holdTime,
+                    token,
+                    binding.Channel).ConfigureAwait(false);
                 return;
             }
 
@@ -224,6 +240,7 @@ namespace AutoGamepad
                 while (rampTimer.ElapsedMilliseconds < rampTime)
                 {
                     token.ThrowIfCancellationRequested();
+                    ApplyHeldAxisJitterIfDue(program, binding.Channel);
 
                     long elapsedMs = rampTimer.ElapsedMilliseconds;
                     float progress = Math.Min(1f, (float)elapsedMs / rampTime);
@@ -250,7 +267,11 @@ namespace AutoGamepad
 
             if (!useJitter)
             {
-                await DelayAsync(holdTime, token).ConfigureAwait(false);
+                await DelayWithHeldAxisJitterAsync(
+                    program,
+                    holdTime,
+                    token,
+                    binding.Channel).ConfigureAwait(false);
                 return;
             }
 
@@ -260,6 +281,7 @@ namespace AutoGamepad
             while (holdTimer.ElapsedMilliseconds < holdTime)
             {
                 token.ThrowIfCancellationRequested();
+                ApplyHeldAxisJitterIfDue(program, binding.Channel);
 
                 long elapsedMs = holdTimer.ElapsedMilliseconds;
                 if (elapsedMs - lastJitterChangeMs >= program.JitterFrequencyMs)
@@ -273,6 +295,86 @@ namespace AutoGamepad
             }
 
             _output.SetAxis(binding.Channel, targetValue);
+        }
+
+        private void RegisterHeldAxisJitter(
+            AutomationProgram program,
+            AxisBinding binding,
+            int targetMagnitudePercent,
+            int jitterForce)
+        {
+            if (!program.EnableJitter || jitterForce <= 0)
+            {
+                _heldAxisJitterStates.Remove(binding.Channel);
+                return;
+            }
+
+            float targetValue = targetMagnitudePercent * binding.Direction;
+            _heldAxisJitterStates[binding.Channel] = new HeldAxisJitterState(
+                targetValue,
+                jitterForce,
+                -program.JitterFrequencyMs);
+            ApplyHeldAxisJitterIfDue(program);
+        }
+
+        private async Task DelayWithHeldAxisJitterAsync(
+            AutomationProgram program,
+            int milliseconds,
+            CancellationToken token,
+            AxisChannel? excludedChannel = null)
+        {
+            if (milliseconds <= 0)
+            {
+                token.ThrowIfCancellationRequested();
+                ApplyHeldAxisJitterIfDue(program, excludedChannel);
+                return;
+            }
+
+            bool hasActiveJitter = _heldAxisJitterStates.Keys.Any(
+                channel => channel != excludedChannel);
+            if (!hasActiveJitter)
+            {
+                await Task.Delay(milliseconds, token).ConfigureAwait(false);
+                return;
+            }
+
+            var timer = Stopwatch.StartNew();
+            while (timer.ElapsedMilliseconds < milliseconds)
+            {
+                token.ThrowIfCancellationRequested();
+                ApplyHeldAxisJitterIfDue(program, excludedChannel);
+                await DelayFrameAsync(milliseconds - timer.ElapsedMilliseconds, token).ConfigureAwait(false);
+            }
+
+            ApplyHeldAxisJitterIfDue(program, excludedChannel);
+        }
+
+        private void ApplyHeldAxisJitterIfDue(
+            AutomationProgram program,
+            AxisChannel? excludedChannel = null)
+        {
+            if (!program.EnableJitter)
+            {
+                return;
+            }
+
+            foreach ((AxisChannel channel, HeldAxisJitterState state) in _heldAxisJitterStates)
+            {
+                if (channel == excludedChannel)
+                {
+                    continue;
+                }
+
+                long elapsedMs = state.Timer.ElapsedMilliseconds;
+                if (elapsedMs - state.LastJitterChangeMs < program.JitterFrequencyMs)
+                {
+                    continue;
+                }
+
+                int jitter = NextInclusive(-state.JitterForcePercent, state.JitterForcePercent);
+                _output.SetAxis(channel, ClampAxis(channel, state.TargetValue + jitter));
+                state.LastJitterChangeMs = elapsedMs;
+            }
         }
 
         private int NextInclusive(int minimum, int maximum)
@@ -298,21 +400,29 @@ namespace AutoGamepad
                 : Math.Clamp(value, -100f, 100f);
         }
 
-        private static Task DelayAsync(int milliseconds, CancellationToken token)
-        {
-            if (milliseconds <= 0)
-            {
-                token.ThrowIfCancellationRequested();
-                return Task.CompletedTask;
-            }
-
-            return Task.Delay(milliseconds, token);
-        }
-
         private static Task DelayFrameAsync(long remainingMilliseconds, CancellationToken token)
         {
             int delay = (int)Math.Clamp(remainingMilliseconds, 1L, FrameDelayMs);
             return Task.Delay(delay, token);
+        }
+
+        private sealed class HeldAxisJitterState
+        {
+            public HeldAxisJitterState(
+                float targetValue,
+                int jitterForcePercent,
+                long lastJitterChangeMs)
+            {
+                TargetValue = targetValue;
+                JitterForcePercent = jitterForcePercent;
+                LastJitterChangeMs = lastJitterChangeMs;
+                Timer = Stopwatch.StartNew();
+            }
+
+            public float TargetValue { get; }
+            public int JitterForcePercent { get; }
+            public Stopwatch Timer { get; }
+            public long LastJitterChangeMs { get; set; }
         }
     }
 }

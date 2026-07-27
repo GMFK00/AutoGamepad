@@ -58,6 +58,7 @@
             btnJsonCopy = new Button();
             txtJsonCode = new RichTextBox();
             btnSaveProfile = new Button();
+            btnSaveProfileAs = new Button();
             btnLoadProfile = new Button();
             chkLimitCycles = new CheckBox();
             numMaxCycles = new NumericUpDown();
@@ -272,7 +273,7 @@
             // 
             // colValue
             // 
-            colValue.HeaderText = "Valor Eixo (0-100%)";
+            colValue.HeaderText = "Valor Eixo (1-100%)";
             colValue.MinimumWidth = 6;
             colValue.Name = "colValue";
             // 
@@ -373,25 +374,37 @@
             txtJsonCode.Size = new Size(1041, 332);
             txtJsonCode.TabIndex = 0;
             txtJsonCode.Text = "";
+            txtJsonCode.TextChanged += txtJsonCode_TextChanged;
             // 
             // btnSaveProfile
             // 
             btnSaveProfile.Anchor = AnchorStyles.Top | AnchorStyles.Right;
-            btnSaveProfile.Location = new Point(930, 5);
+            btnSaveProfile.Location = new Point(806, 5);
             btnSaveProfile.Name = "btnSaveProfile";
             btnSaveProfile.Size = new Size(119, 43);
             btnSaveProfile.TabIndex = 20;
             btnSaveProfile.Text = "💾 Salvar";
             btnSaveProfile.UseVisualStyleBackColor = true;
             btnSaveProfile.Click += btnSaveProfile_Click;
-            // 
+            //
+            // btnSaveProfileAs
+            //
+            btnSaveProfileAs.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            btnSaveProfileAs.Location = new Point(930, 5);
+            btnSaveProfileAs.Name = "btnSaveProfileAs";
+            btnSaveProfileAs.Size = new Size(119, 43);
+            btnSaveProfileAs.TabIndex = 21;
+            btnSaveProfileAs.Text = "Salvar como";
+            btnSaveProfileAs.UseVisualStyleBackColor = true;
+            btnSaveProfileAs.Click += btnSaveProfileAs_Click;
+            //
             // btnLoadProfile
             // 
             btnLoadProfile.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             btnLoadProfile.Location = new Point(1055, 5);
             btnLoadProfile.Name = "btnLoadProfile";
             btnLoadProfile.Size = new Size(119, 43);
-            btnLoadProfile.TabIndex = 21;
+            btnLoadProfile.TabIndex = 22;
             btnLoadProfile.Text = "📂 Carregar";
             btnLoadProfile.UseVisualStyleBackColor = true;
             btnLoadProfile.Click += btnLoadProfile_Click;
@@ -439,6 +452,7 @@
             numJitterFreq.Size = new Size(150, 27);
             numJitterFreq.TabIndex = 25;
             numJitterFreq.Value = new decimal(new int[] { 100, 0, 0, 0 });
+            numJitterFreq.ValueChanged += numJitterFreq_ValueChanged;
             //
             // lblCycleTimeEstimate
             //
@@ -471,7 +485,7 @@
             lblExecutionStatus.Font = new Font("Segoe UI", 9F, FontStyle.Bold);
             lblExecutionStatus.Location = new Point(620, 8);
             lblExecutionStatus.Name = "lblExecutionStatus";
-            lblExecutionStatus.Size = new Size(304, 37);
+            lblExecutionStatus.Size = new Size(180, 37);
             lblExecutionStatus.TabIndex = 28;
             lblExecutionStatus.Text = "Pronto";
             lblExecutionStatus.TextAlign = ContentAlignment.MiddleCenter;
@@ -489,6 +503,7 @@
             Controls.Add(numMaxCycles);
             Controls.Add(chkLimitCycles);
             Controls.Add(btnLoadProfile);
+            Controls.Add(btnSaveProfileAs);
             Controls.Add(btnSaveProfile);
             Controls.Add(tabEditor);
             Controls.Add(chkSound);
@@ -530,6 +545,7 @@
         private Button btnJsonPaste;
         private Button btnJsonCopy;
         private Button btnSaveProfile;
+        private Button btnSaveProfileAs;
         private Button btnLoadProfile;
         private CheckBox chkLimitCycles;
         private NumericUpDown numMaxCycles;

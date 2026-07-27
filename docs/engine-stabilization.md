@@ -1,10 +1,10 @@
 # Evolução do motor e do editor de sequências
 
-Este documento registra a estabilização iniciada para a `v1.2.0` e as evoluções do editor, do planejamento de tempo e do acompanhamento da execução incorporadas à `v1.3.0`. O objetivo é manter interrupção, execução contínua, controle de eixos e edição de sequências previsíveis, preservando a compatibilidade com os perfis JSON existentes.
+Este documento registra a estabilização iniciada para a `v1.2.0`, as evoluções do editor incorporadas à `v1.3.0` e a rodada de confiabilidade preparada para a `v1.4.0`. O objetivo é manter interrupção, execução contínua, controle de eixos, arquivos e edição de sequências previsíveis, preservando a compatibilidade com perfis JSON válidos existentes.
 
 ## Status da validação
 
-As mudanças da `v1.3.0` foram validadas em campo com o controle virtual real, incluindo edição contextual, operações de linha, marcadores de log, estimativas de tempo e progresso de execução. Os testes automatizados permanecem como proteção contra regressões.
+As mudanças da `v1.3.0` foram validadas em campo com o controle virtual real. A rodada `v1.4.0` possui cobertura automatizada e deve cumprir o roteiro manual atualizado ao final deste documento antes da publicação.
 
 ## Escopo implementado
 
@@ -45,7 +45,7 @@ Direita e cima usam magnitude positiva; esquerda e baixo usam magnitude negativa
 
 Ao iniciar uma execução, tanto o `RichTextBox` quanto a fila `_logUIBuffer` são limpos. Assim, linhas de uma execução anterior não reaparecem depois do primeiro registro novo.
 
-A gravação em disco continua usando lotes. Erros de acesso ao diretório de logs não interrompem mais o motor.
+A gravação em disco usa lotes de 50 linhas, fila máxima de 500 e retry de dois segundos. Se a fila atingir o limite durante uma falha permanente, as linhas mais antigas são descartadas com contador e aviso visual. Os arquivos ficam em `%LocalAppData%\AutoGamepad\Logs`.
 
 ### 6. Limites numéricos e sorteio inclusivo
 
@@ -54,6 +54,8 @@ Valores mínimo e máximo iguais continuam válidos e representam tempo fixo.
 O sorteio inclusivo passou a usar `Random.NextInt64(min, (long)max + 1)`. A promoção para `long` evita overflow quando o máximo é `int.MaxValue`. Os contadores das rampas usam tempo real do `Stopwatch`, evitando overflow por soma repetida de frames.
 
 Texto numérico que não cabe em `Int32` é rejeitado em vez de ser convertido silenciosamente para zero.
+
+Na `v1.4.0`, qualquer campo numérico ativo e vazio também é rejeitado. Células realmente desabilitadas continuam sendo representadas internamente por zero, mas um campo obrigatório nunca recebe fallback de 0% ou 100%.
 
 ### 7. Separação entre UI, motor e ViGEm
 
@@ -117,9 +119,48 @@ Interrompido — Ciclo 3, linha 5
 
 Em execução contínua, o total de ciclos é omitido. A linha atual recebe destaque de seleção, é mantida na área visível e não pode ser substituída por outra seleção enquanto o motor está ativo. Ao concluir, interromper ou falhar, o destaque é removido e a seleção anterior ao início é restaurada quando a linha ainda existe.
 
+### 12. Jitter durante sustentação e liberação
+
+O jitter de uma etapa analógica `Tap` vale para subida, platô e descida. Uma etapa `Release` de eixo possui seu próprio campo de jitter.
+
+Ao concluir a rampa de um `Hold`, o motor registra a modulação ativa do canal. Esperas e durações posteriores continuam atualizando esse canal até o `Release`. O scheduler faz essas atualizações junto das esperas existentes, sem criar uma thread concorrente por eixo. No fim de uma ação ou no cancelamento, o valor exato de destino ou neutro é reaplicado.
+
+### 13. Perfis, Save e estado alterado
+
+O aplicativo mantém o caminho do perfil aberto:
+
+- `Salvar` atualiza esse caminho;
+- `Salvar como` escolhe um novo destino;
+- o título mostra `*` enquanto houver alterações;
+- carregar outro perfil ou fechar oferece salvar, descartar ou cancelar;
+- a gravação usa arquivo temporário no mesmo diretório e substituição segura;
+- uma falha de escrita preserva a versão anterior.
+
+O texto JSON editado é tratado como rascunho até ser aplicado. Ao sair da aba Código, o usuário decide aplicar, descartar ou continuar editando. Salvar ou iniciar também exige que esse rascunho seja válido e aplicado, impedindo que a tabela sobrescreva código silenciosamente.
+
+### 14. Registro real das hotkeys
+
+`Ctrl+Shift+F9` e `Ctrl+Shift+F10` são registrados como um conjunto. O retorno do Windows é verificado para cada combinação. Se uma falhar, qualquer registro parcial é desfeito, o log informa a falha e uma mensagem explica que os botões da janela continuam disponíveis.
+
+### 15. Encerramento seguro
+
+O primeiro pedido de fechamento é cancelado temporariamente. Depois de resolver alterações não salvas, o aplicativo:
+
+1. remove as hotkeys;
+2. solicita cancelamento;
+3. aguarda a tarefa do motor por até cinco segundos;
+4. neutraliza o controle;
+5. desconecta o dispositivo;
+6. força uma última tentativa de log;
+7. conclui o fechamento.
+
+Se o motor ultrapassar o timeout, o log registra o ocorrido e a neutralização de emergência é aplicada.
+
 ## Compatibilidade
 
 - Perfis existentes continuam sendo importados; a ausência de `Message` é aceita normalmente.
+- Perfis válidos exportados por versões anteriores mantêm os mesmos campos numéricos e continuam sendo importados.
+- Um campo numérico obrigatório ausente deixa de receber fallback silencioso e passa a produzir erro de validação.
 - A propriedade `Message` é omitida nas etapas que não são marcadores, preservando o formato existente desses passos.
 - Perfis que usam a ação `Log` exigem esta versão ou uma posterior. Versões anteriores rejeitam o identificador de ação desconhecido.
 - Perfis legados com `Wait` associado a um controle são normalizados para a opção vazia.
@@ -149,6 +190,12 @@ Os testes cobrem:
 - aritmética segura para intervalos configurados com `int.MaxValue`.
 - notificação de ciclo, linha, quantidade de etapas e ação atual pelo motor;
 - formatação dos estados em execução limitada, execução contínua, conclusão, interrupção e falha.
+- rejeição de campos obrigatórios vazios e de força analógica fora de 1% a 100%;
+- jitter durante `Hold` seguido de `Wait`, descida do `Tap` e rampa de `Release`;
+- limite, backoff, recuperação e descarte controlado da fila de log;
+- estado alterado, supressão de mudanças programáticas e substituição segura de arquivos;
+- ativação atômica e rollback das hotkeys;
+- espera de conclusão e timeout durante o encerramento.
 
 ## Roteiro de validação manual
 
@@ -174,3 +221,15 @@ Com o ViGEmBus instalado:
 18. Execute uma sequência com pausas longas e confirme que o label mostra ciclo e linha atuais, que a linha ativa fica destacada e que a tabela rola automaticamente quando necessário.
 19. Durante a execução, tente selecionar outra linha e editar a tabela; confirme que o destaque retorna para a etapa ativa e que nenhuma célula pode ser alterada.
 20. Valide término normal, botão Parar e uma falha de execução; confirme que o destaque é removido, a seleção anterior é restaurada e o label mostra o estado final correspondente.
+21. Em um `Tap` de eixo, apague o campo de valor; confirme que a célula não aceita vazio. Informe `0` e confirme que somente 1% a 100% são aceitos.
+22. Apague um tempo ou rampa ativos e confirme o erro. Digite `0` explicitamente e confirme que uma etapa instantânea continua válida.
+23. Ative jitter, crie `Hold LT` com valor 50 e jitter 10, adicione `Wait` longo e `Release LT`; observe nas propriedades do controle que o gatilho continua variando durante a espera e termina em zero.
+24. Configure rampa e jitter em um `Tap` analógico; confirme variação durante subida e descida. Configure outro jitter na linha `Release` e confirme que ele vale para essa rampa.
+25. Com o jitter global desmarcado, reinicie o aplicativo e confirme que a frequência aparece desabilitada.
+26. Edite uma sequência e confirme o `*` no título. Salve, edite novamente e confirme que `Salvar` reutiliza o mesmo arquivo; use `Salvar como` e confirme a mudança do nome no título.
+27. Edite o JSON e tente voltar à tabela. Valide as opções Aplicar, Descartar e Cancelar e confirme que nenhuma delas sobrescreve texto sem decisão.
+28. Faça uma alteração e tente carregar outro perfil e fechar o aplicativo. Valide Salvar, Não e Cancelar em ambos os fluxos.
+29. Abra duas instâncias. Confirme que a segunda informa o conflito das hotkeys e que seus botões continuam funcionando; feche a primeira e reinicie a segunda para confirmar o registro normal.
+30. Inicie uma espera longa e feche a janela. Confirme que o aplicativo cancela, aguarda e que todos os botões/eixos ficam neutros antes do dispositivo virtual desaparecer.
+31. Para testar falha de log, negue temporariamente escrita em `%LocalAppData%\AutoGamepad\Logs`, produza mais de 500 mensagens e confirme que a memória permanece limitada e aparece aviso de descarte. Restaure a permissão, aguarde dois segundos, produza outra mensagem e confirme o aviso de recuperação.
+32. Execute e finalize ou interrompa uma sequência que contenha `Wait`; edite qualquer campo e inicie novamente. Confirme que rampa e jitter da pausa continuam bloqueados e que o validador não os trata como obrigatórios.

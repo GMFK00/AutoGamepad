@@ -121,6 +121,29 @@ namespace AutoGamepad
             return action is not ActionType.Wait and not ActionType.Log;
         }
 
+        public static bool IsJitterEditable(ActionType action, bool isAxis)
+        {
+            return isAxis
+                && action is ActionType.PressAndRelease or ActionType.Hold or ActionType.Release;
+        }
+
+        public static bool IsAxisValueEditable(ActionType action, bool isAxis)
+        {
+            return isAxis
+                && action is ActionType.PressAndRelease or ActionType.Hold;
+        }
+
+        public static bool IsRampEditable(ActionType action, bool isAxis)
+        {
+            return isAxis
+                && action is ActionType.PressAndRelease or ActionType.Hold or ActionType.Release;
+        }
+
+        public static bool IsDurationEditable(ActionType action)
+        {
+            return action is ActionType.PressAndRelease or ActionType.Wait;
+        }
+
         public static GamepadControl NormalizeControl(ActionType action, GamepadControl control)
         {
             if (action is ActionType.Wait or ActionType.Log)
@@ -129,6 +152,26 @@ namespace AutoGamepad
             }
 
             return control == GamepadControl.None ? GamepadControl.A : control;
+        }
+    }
+
+    internal static class SequenceNumericRules
+    {
+        public static bool TryParseRequired(string? text, out int value)
+        {
+            value = 0;
+
+            if (string.IsNullOrWhiteSpace(text) || text.Trim() == "-")
+            {
+                return false;
+            }
+
+            return int.TryParse(text, out value);
+        }
+
+        public static bool IsAxisMagnitudeValid(int value)
+        {
+            return value is >= 1 and <= 100;
         }
     }
 

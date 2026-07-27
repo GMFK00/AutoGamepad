@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using System.Media;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -28,6 +27,13 @@ namespace AutoGamepad
         private int? _activeExecutionId;
         private int? _selectedRowBeforeExecution;
         private int? _highlightedExecutionRowIndex;
+        private readonly ProfileDocumentState _profileDocumentState = new();
+        private bool _isSynchronizingJsonEditor;
+        private bool _isChangingEditorTab;
+        private bool _jsonHasUnappliedChanges;
+        private GlobalHotkeyManager? _globalHotkeys;
+        private bool _shutdownInProgress;
+        private bool _shutdownCompleted;
 
         private const string EMPTY_CONTROL_LABEL = "[Vazio / Apenas Pausa]";
         private const string DEFAULT_CONTROL_LABEL = "Botão A";
@@ -37,10 +43,12 @@ namespace AutoGamepad
         private const int MAX_LOG_LINES_UI = 500; // Máximo de linhas mostradas na tela preta
         private readonly Queue<string> _logUIBuffer = new Queue<string>(MAX_LOG_LINES_UI);
 
-        private readonly List<string> _logDiskBuffer = new List<string>();
-        private const int MAX_LOG_DISK_BUFFER = 50; // Salva no HD a cada 50 mensagens
+        private const int LOG_DISK_FLUSH_THRESHOLD = 50;
+        private const int MAX_PENDING_LOG_LINES = 500;
+        private static readonly TimeSpan LOG_DISK_RETRY_DELAY = TimeSpan.FromSeconds(2);
+        private readonly BoundedLogBuffer _logDiskBuffer;
         private string? _currentLogFilePath = null;
-        private readonly object _logLock = new object(); // Trava de segurança para múltiplas Threads
+        private long _lastReportedDroppedLogLines;
 
         // --- DICIONÁRIOS DE TRADUÇÃO (VISUAL <-> JSON) ---
 
@@ -83,13 +91,6 @@ namespace AutoGamepad
             return EMPTY_CONTROL_LABEL; // Fallback seguro
         }
 
-        // --- HOTKEYS GLOBAIS DO WINDOWS ---
-        [DllImport("user32.dll")]
-        private static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
-
-        [DllImport("user32.dll")]
-        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
         // Constantes para as teclas e modificadores
         private const int HOTKEY_ID_START = 1;
         private const int HOTKEY_ID_STOP = 2;
@@ -97,21 +98,79 @@ namespace AutoGamepad
         private const int VK_F10 = 0x79; // F10
         private const int MOD_CONTROL = 0x0002; // Tecla CTRL
         private const int MOD_SHIFT = 0x0004;   // Tecla SHIFT
+        private const int ERROR_HOTKEY_ALREADY_REGISTERED = 1409;
+        private static readonly TimeSpan SHUTDOWN_TIMEOUT = TimeSpan.FromSeconds(5);
 
         public Form1()
         {
-            InitializeComponent();
+            using (_profileDocumentState.SuppressChangeTracking())
+            {
+                InitializeComponent();
+            }
 
-            // Adiciona as Hotkeys: CTRL + SHIFT + F9 | CTRL + SHIFT + F10
-            // O operador '|' soma os bits do Control e do Shift
-            RegisterHotKey(this.Handle, HOTKEY_ID_START, MOD_CONTROL | MOD_SHIFT, VK_F9);
-            RegisterHotKey(this.Handle, HOTKEY_ID_STOP, MOD_CONTROL | MOD_SHIFT, VK_F10);
+            _logDiskBuffer = new BoundedLogBuffer(
+                LOG_DISK_FLUSH_THRESHOLD,
+                MAX_PENDING_LOG_LINES,
+                LOG_DISK_RETRY_DELAY,
+                WriteLogBatchToDisk);
+            _profileDocumentState.StateChanged += UpdateWindowTitle;
 
-            Log("Atalhos globais ativados: [Ctrl+Shift+F9] Iniciar | [Ctrl+Shift+F10] Parar");
+            RegisterGlobalHotkeys();
 
             // Configura a tabela
             SetupGridColumns();
+            UpdateJitterFrequencyState();
             UpdateTimeEstimates();
+            UpdateWindowTitle();
+        }
+
+        private void RegisterGlobalHotkeys()
+        {
+            _globalHotkeys = new GlobalHotkeyManager(
+                new WindowsGlobalHotkeyRegistrar(),
+                Handle);
+
+            GlobalHotkeyDefinition[] definitions =
+            [
+                new(
+                    HOTKEY_ID_START,
+                    MOD_CONTROL | MOD_SHIFT,
+                    VK_F9,
+                    "Ctrl+Shift+F9 (Iniciar)"),
+                new(
+                    HOTKEY_ID_STOP,
+                    MOD_CONTROL | MOD_SHIFT,
+                    VK_F10,
+                    "Ctrl+Shift+F10 (Parar)")
+            ];
+
+            GlobalHotkeyActivationResult result = _globalHotkeys.Activate(definitions);
+            if (result.IsActive)
+            {
+                Log("Atalhos globais ativados: [Ctrl+Shift+F9] Iniciar | [Ctrl+Shift+F10] Parar");
+                return;
+            }
+
+            string failureDetails = string.Join(
+                Environment.NewLine,
+                result.Failures.Select(failure =>
+                {
+                    string reason = failure.ErrorCode == ERROR_HOTKEY_ALREADY_REGISTERED
+                        ? "já está sendo usado por outro aplicativo"
+                        : $"falhou com o erro do Windows {failure.ErrorCode}";
+                    return $"• {failure.Definition.DisplayName}: {reason}.";
+                }));
+            string warning =
+                "Os atalhos globais não foram ativados. Os botões da janela continuam funcionando.\n\n" +
+                failureDetails;
+
+            Log($"[AVISO] Atalhos globais desativados. {failureDetails.Replace(Environment.NewLine, " ")}");
+            Shown += (_, _) => MessageBox.Show(
+                this,
+                warning,
+                "Atalhos globais indisponíveis",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
         }
 
         // --- INTERCEPTADOR DO TECLADO ---
@@ -123,11 +182,15 @@ namespace AutoGamepad
             {
                 int id = m.WParam.ToInt32();
 
-                if (id == HOTKEY_ID_START && btnStart.Enabled)
+                if (id == HOTKEY_ID_START
+                    && _globalHotkeys?.IsRegistered(HOTKEY_ID_START) == true
+                    && btnStart.Enabled)
                 {
                     btnStart.PerformClick(); // Simula um clique real no botão "Iniciar"
                 }
-                else if (id == HOTKEY_ID_STOP && btnStop.Enabled)
+                else if (id == HOTKEY_ID_STOP
+                    && _globalHotkeys?.IsRegistered(HOTKEY_ID_STOP) == true
+                    && btnStop.Enabled)
                 {
                     btnStop.PerformClick(); // Simula um clique real no botão "Parar"
                 }
@@ -139,6 +202,12 @@ namespace AutoGamepad
         // --- BOTÃO INICIAR ---
         private async void btnStart_Click(object sender, EventArgs e)
         {
+            if (_jsonHasUnappliedChanges
+                && !TryApplyJsonEditorChanges(showResultMessage: false))
+            {
+                return;
+            }
+
             if (_sequenceNeedsValidation)
             {
                 if (!ValidateSequence())
@@ -214,10 +283,14 @@ namespace AutoGamepad
                     _cancellationTokenSource = null;
                 }
                 cancellationSource.Dispose();
-                EndExecutionProgressTracking(executionId);
-                ToggleUI(true);
-                lblExecutionStatus.Text = finalStatus;
-                Log("Ciclo de automação finalizado.");
+
+                if (!_shutdownInProgress && !IsDisposed && !Disposing)
+                {
+                    EndExecutionProgressTracking(executionId);
+                    ToggleUI(true);
+                    lblExecutionStatus.Text = finalStatus;
+                    Log("Ciclo de automação finalizado.");
+                }
             }
         }
 
@@ -436,6 +509,8 @@ namespace AutoGamepad
                 string controlLabel = row.Cells["colButton"].Value?.ToString() ?? "";
                 string controlJsonId = _buttonToJson.GetValueOrDefault(controlLabel, "None");
                 ActionType action = ParseAction(actionLabel);
+                GamepadControl control = GamepadControlCatalog.FromJsonId(controlJsonId);
+                bool isAxis = GamepadControlCatalog.TryGetAxisBinding(control, out _);
                 string message = action == ActionType.Log
                     ? row.Cells["colMessage"].Value?.ToString()?.Trim() ?? ""
                     : "";
@@ -443,15 +518,27 @@ namespace AutoGamepad
                 steps.Add(new AutomationStep(
                     action,
                     actionLabel,
-                    GamepadControlCatalog.FromJsonId(controlJsonId),
+                    control,
                     controlLabel,
                     message,
-                    ParseCell(row, "colValue", 100),
-                    ParseCell(row, "colRampMin", 0),
-                    ParseCell(row, "colRampMax", 0),
-                    ParseCell(row, "colMinTime", 0),
-                    ParseCell(row, "colMaxTime", 0),
-                    ParseCell(row, "colJitter", 0)));
+                    SequenceGridRules.IsAxisValueEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colValue")
+                        : 0,
+                    SequenceGridRules.IsRampEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colRampMin")
+                        : 0,
+                    SequenceGridRules.IsRampEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colRampMax")
+                        : 0,
+                    SequenceGridRules.IsDurationEditable(action)
+                        ? ReadValidatedCell(row, "colMinTime")
+                        : 0,
+                    SequenceGridRules.IsDurationEditable(action)
+                        ? ReadValidatedCell(row, "colMaxTime")
+                        : 0,
+                    SequenceGridRules.IsJitterEditable(action, isAxis)
+                        ? ReadValidatedCell(row, "colJitter")
+                        : 0));
             }
 
             return new AutomationProgram(
@@ -474,9 +561,21 @@ namespace AutoGamepad
             };
         }
 
-        private static int ParseCell(DataGridViewRow row, string columnName, int fallback)
+        private static int ReadValidatedCell(DataGridViewRow row, string columnName)
         {
-            return int.TryParse(row.Cells[columnName].Value?.ToString(), out int value) ? value : fallback;
+            DataGridViewCell cell = row.Cells[columnName];
+            if (cell.ReadOnly)
+            {
+                return 0;
+            }
+
+            if (SequenceNumericRules.TryParseRequired(cell.Value?.ToString(), out int value))
+            {
+                return value;
+            }
+
+            throw new InvalidOperationException(
+                $"A célula obrigatória '{columnName}' não contém um número inteiro válido.");
         }
 
         private void UpdateTimeEstimates()
@@ -626,12 +725,12 @@ namespace AutoGamepad
                         ? row.Cells["colMessage"].Value?.ToString()?.Trim()
                         : null,
 
-                    ValuePercent = int.TryParse(row.Cells["colValue"].Value?.ToString(), out int v) ? v : 100,
-                    RampMin = int.TryParse(row.Cells["colRampMin"].Value?.ToString(), out int rMin) ? rMin : 0,
-                    RampMax = int.TryParse(row.Cells["colRampMax"].Value?.ToString(), out int rMax) ? rMax : 0,
-                    WaitMin = int.TryParse(row.Cells["colMinTime"].Value?.ToString(), out int tMin) ? tMin : 0,
-                    WaitMax = int.TryParse(row.Cells["colMaxTime"].Value?.ToString(), out int tMax) ? tMax : 0,
-                    JitterForce = int.TryParse(row.Cells["colJitter"].Value?.ToString(), out int jf) ? jf : 0
+                    ValuePercent = ReadOptionalProfileCell(row, "colValue"),
+                    RampMin = ReadOptionalProfileCell(row, "colRampMin"),
+                    RampMax = ReadOptionalProfileCell(row, "colRampMax"),
+                    WaitMin = ReadOptionalProfileCell(row, "colMinTime"),
+                    WaitMax = ReadOptionalProfileCell(row, "colMaxTime"),
+                    JitterForce = ReadOptionalProfileCell(row, "colJitter")
                 };
 
                 profile.Steps.Add(step);
@@ -639,6 +738,20 @@ namespace AutoGamepad
 
             var options = new JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
             return JsonSerializer.Serialize(profile, options);
+        }
+
+        private static int? ReadOptionalProfileCell(DataGridViewRow row, string columnName)
+        {
+            DataGridViewCell cell = row.Cells[columnName];
+            if (cell.ReadOnly)
+            {
+                // Mantém o formato dos perfis existentes: campos não aplicáveis são exportados como zero.
+                return 0;
+            }
+
+            return SequenceNumericRules.TryParseRequired(cell.Value?.ToString(), out int value)
+                ? value
+                : null;
         }
 
         // --- IMPORTA UMA STRING JSON PARA A TELA ---
@@ -673,44 +786,49 @@ namespace AutoGamepad
                     }
                 }
 
-                // Se passou pelo check de segurança, limpa a tabela para receber os dados
-                gridSequence.Rows.Clear();
-
-                chkLimitCycles.Checked = profile.UseCycleLimit;
-                numMaxCycles.Value = Math.Max(numMaxCycles.Minimum, Math.Min(numMaxCycles.Maximum, profile.MaxCycles));
-                chkEnableJitter.Checked = profile.EnableGlobalJitter;
-                numJitterFreq.Value = Math.Max(numJitterFreq.Minimum, Math.Min(numJitterFreq.Maximum, profile.JitterFrequencyMs));
-
-                foreach (var step in profile.Steps)
+                // Carregar/aplicar um perfil é uma única alteração lógica. Eventos intermediários
+                // não devem sujar o documento várias vezes nem produzir estado parcialmente visível.
+                using (_profileDocumentState.SuppressChangeTracking())
                 {
-                    int rowIndex = gridSequence.Rows.Add();
-                    var row = gridSequence.Rows[rowIndex];
+                    // Se passou pelo check de segurança, limpa a tabela para receber os dados
+                    gridSequence.Rows.Clear();
 
-                    _isConfiguringSequenceRow = true;
-                    try
+                    chkLimitCycles.Checked = profile.UseCycleLimit;
+                    numMaxCycles.Value = Math.Max(numMaxCycles.Minimum, Math.Min(numMaxCycles.Maximum, profile.MaxCycles));
+                    chkEnableJitter.Checked = profile.EnableGlobalJitter;
+                    numJitterFreq.Value = Math.Max(numJitterFreq.Minimum, Math.Min(numJitterFreq.Maximum, profile.JitterFrequencyMs));
+
+                    foreach (var step in profile.Steps)
                     {
-                        // Lê o nome curto do JSON e devolve a frase longa pra Tabela
-                        row.Cells["colAction"].Value = GetActionFromJson(step.Action);
-                        row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
-                        row.Cells["colMessage"].Value = step.Message ?? "";
+                        int rowIndex = gridSequence.Rows.Add();
+                        var row = gridSequence.Rows[rowIndex];
 
-                        row.Cells["colValue"].Value = step.ValuePercent.ToString();
-                        row.Cells["colRampMin"].Value = step.RampMin.ToString();
-                        row.Cells["colRampMax"].Value = step.RampMax.ToString();
-                        row.Cells["colMinTime"].Value = step.WaitMin.ToString();
-                        row.Cells["colMaxTime"].Value = step.WaitMax.ToString();
-                        row.Cells["colJitter"].Value = step.JitterForce.ToString();
-                    }
-                    finally
-                    {
-                        _isConfiguringSequenceRow = false;
+                        _isConfiguringSequenceRow = true;
+                        try
+                        {
+                            // Lê o nome curto do JSON e devolve a frase longa pra Tabela
+                            row.Cells["colAction"].Value = GetActionFromJson(step.Action);
+                            row.Cells["colButton"].Value = GetButtonFromJson(step.Button);
+                            row.Cells["colMessage"].Value = step.Message ?? "";
+
+                            row.Cells["colValue"].Value = step.ValuePercent?.ToString() ?? "";
+                            row.Cells["colRampMin"].Value = step.RampMin?.ToString() ?? "";
+                            row.Cells["colRampMax"].Value = step.RampMax?.ToString() ?? "";
+                            row.Cells["colMinTime"].Value = step.WaitMin?.ToString() ?? "";
+                            row.Cells["colMaxTime"].Value = step.WaitMax?.ToString() ?? "";
+                            row.Cells["colJitter"].Value = step.JitterForce?.ToString() ?? "";
+                        }
+                        finally
+                        {
+                            _isConfiguringSequenceRow = false;
+                        }
+
+                        ConfigureSequenceRow(row, configureButtonOptions: true);
                     }
 
-                    ConfigureSequenceRow(row, configureButtonOptions: true);
+                    _sequenceNeedsValidation = true;
+                    UpdateTimeEstimates();
                 }
-
-                _sequenceNeedsValidation = true;
-                UpdateTimeEstimates();
 
                 // Se não é só um preview, avisa o usuário que importou com sucesso e já roda a validação lógica
                 if (!isPreview)
@@ -739,6 +857,19 @@ namespace AutoGamepad
             // A tabela permanece visível e navegável para exibir o progresso,
             // mas não pode ser editada enquanto o motor está ativo.
             gridSequence.ReadOnly = !isIdle;
+            if (isIdle)
+            {
+                // Alternar o ReadOnly global de true para false remove as travas
+                // individuais das células. Reaplica as regras de cada tipo de ação.
+                foreach (DataGridViewRow row in gridSequence.Rows)
+                {
+                    if (row.Cells["colAction"].Value != null)
+                    {
+                        ConfigureSequenceRow(row, configureButtonOptions: true);
+                    }
+                }
+            }
+
             txtJsonCode.Enabled = isIdle;
             btnRowAdd.Enabled = isIdle;
             btnRowInsert.Enabled = isIdle;
@@ -750,6 +881,7 @@ namespace AutoGamepad
             btnJsonValidate.Enabled = isIdle;
             btnJsonCopy.Enabled = isIdle;
             btnSaveProfile.Enabled = isIdle;
+            btnSaveProfileAs.Enabled = isIdle;
             btnLoadProfile.Enabled = isIdle;
 
             // Travas de Ciclo e Som
@@ -761,8 +893,7 @@ namespace AutoGamepad
 
             // --- Travas do Jitter Global ---
             chkEnableJitter.Enabled = isIdle;
-            // Só libera a frequência se estiver em Idle E o checkbox de tremor estiver marcado
-            numJitterFreq.Enabled = isIdle && chkEnableJitter.Checked;
+            UpdateJitterFrequencyState();
         }
 
         private void ClearVisualLog()
@@ -779,12 +910,21 @@ namespace AutoGamepad
             string formattedMessage = $"[{timestamp}] {message}";
 
             // 1. ATUALIZAÇÃO DA TELA PRETA (RAM)
+            AppendToVisualLog(formattedMessage);
+
+            // 2. GRAVAÇÃO EM DISCO COM FILA LIMITADA E RETRY CONTROLADO
+            LogBufferResult result = _logDiskBuffer.Append(formattedMessage, DateTimeOffset.UtcNow);
+            ReportDiskLogState(result);
+        }
+
+        private void AppendToVisualLog(string formattedMessage)
+        {
             // Usa o Invoke para garantir que as Threads assíncronas do Motor Físico não causem crash na UI
             if (rtbLog != null && !rtbLog.IsDisposed && rtbLog.IsHandleCreated)
             {
                 try
                 {
-                    void AppendToVisualLog()
+                    void AppendLine()
                     {
                         // Se a fila já tem 500 linhas, joga a mais velha fora
                         if (_logUIBuffer.Count >= MAX_LOG_LINES_UI)
@@ -804,11 +944,11 @@ namespace AutoGamepad
 
                     if (rtbLog.InvokeRequired)
                     {
-                        rtbLog.Invoke((Action)AppendToVisualLog);
+                        rtbLog.Invoke((Action)AppendLine);
                     }
                     else
                     {
-                        AppendToVisualLog();
+                        AppendLine();
                     }
                 }
                 catch (InvalidOperationException)
@@ -816,61 +956,71 @@ namespace AutoGamepad
                     // A janela pode estar destruindo o handle durante o encerramento.
                 }
             }
+        }
 
-            // 2. GRAVAÇÃO EM DISCO RÍGIDO (Buffer Batching)
-            // Usamos a trava "lock" porque o C# pode rodar múltiplas coisas ao mesmo tempo e estourar o arquivo
-            lock (_logLock)
+        private void ReportDiskLogState(LogBufferResult result)
+        {
+            if (result.FailureStarted)
             {
-                try
-                {
-                    // Se o caminho do arquivo ainda não foi criado, cria agora!
-                    if (string.IsNullOrEmpty(_currentLogFilePath))
-                    {
-                        // Garante que a pasta "Logs" existe na mesma pasta do .exe
-                        string logDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Logs");
-                        if (!Directory.Exists(logDir)) Directory.CreateDirectory(logDir);
+                AppendVisualNotice(
+                    $"[AVISO] Não foi possível gravar o log em disco. " +
+                    $"Novas tentativas ocorrerão a cada {LOG_DISK_RETRY_DELAY.TotalSeconds:0} segundos; " +
+                    $"a fila está limitada a {MAX_PENDING_LOG_LINES} linhas. Motivo: {result.ErrorMessage}");
+            }
 
-                        // Cria o nome do arquivo com a data e hora de agora
-                        string dateStr = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
-                        _currentLogFilePath = Path.Combine(logDir, $"AutoGamepad_{dateStr}.log");
-                    }
+            long lastReportedDroppedLines = Interlocked.Read(ref _lastReportedDroppedLogLines);
+            if (result.DroppedLineCount > lastReportedDroppedLines
+                && (lastReportedDroppedLines == 0
+                    || result.DroppedLineCount - lastReportedDroppedLines >= 100)
+                && Interlocked.CompareExchange(
+                    ref _lastReportedDroppedLogLines,
+                    result.DroppedLineCount,
+                    lastReportedDroppedLines) == lastReportedDroppedLines)
+            {
+                AppendVisualNotice(
+                    $"[AVISO] {result.DroppedLineCount} linha(s) de log em disco foram descartadas " +
+                    "para manter o uso de memória limitado.");
+            }
 
-                    _logDiskBuffer.Add(formattedMessage);
-
-                    // Se o pacote de mensagens bateu a cota (50 linhas), despeja no HD e limpa o pacote
-                    if (_logDiskBuffer.Count >= MAX_LOG_DISK_BUFFER)
-                    {
-                        FlushLogToDisk();
-                    }
-                }
-                catch (IOException)
-                {
-                    // O log não pode interromper o motor.
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    // O diretório do executável pode não permitir escrita.
-                }
+            if (result.Recovered)
+            {
+                AppendVisualNotice(
+                    $"[INFO] A gravação do log em disco foi retomada. " +
+                    $"Total descartado durante falhas: {result.DroppedLineCount} linha(s).");
             }
         }
 
-        // Função auxiliar que abre o arquivo de texto, insere o pacote e fecha
+        private void AppendVisualNotice(string message)
+        {
+            string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            AppendToVisualLog($"[{timestamp}] {message}");
+        }
+
+        private void WriteLogBatchToDisk(IReadOnlyList<string> messages)
+        {
+            if (string.IsNullOrEmpty(_currentLogFilePath))
+            {
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrWhiteSpace(localAppData))
+                {
+                    throw new IOException("O Windows não informou uma pasta LocalAppData válida.");
+                }
+
+                string logDirectory = Path.Combine(localAppData, "AutoGamepad", "Logs");
+                Directory.CreateDirectory(logDirectory);
+
+                string date = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss_fff");
+                _currentLogFilePath = Path.Combine(logDirectory, $"AutoGamepad_{date}.log");
+            }
+
+            File.AppendAllLines(_currentLogFilePath, messages);
+        }
+
+        // Tenta gravar o restante mesmo se o logger estiver aguardando o próximo retry.
         private void FlushLogToDisk()
         {
-            lock (_logLock)
-            {
-                if (_logDiskBuffer.Count == 0 || string.IsNullOrEmpty(_currentLogFilePath)) return;
-
-                try
-                {
-                    File.AppendAllLines(_currentLogFilePath, _logDiskBuffer);
-                    _logDiskBuffer.Clear(); // Esvazia o buffer da memória RAM
-                }
-                catch
-                {
-                    // Falha silenciosa para não travar a automação caso o antivírus esteja escaneando o arquivo na hora
-                }
-            }
+            LogBufferResult result = _logDiskBuffer.Flush(DateTimeOffset.UtcNow, force: true);
+            ReportDiskLogState(result);
         }
 
         // Toca um som suave pelo alto-falante do Windows
@@ -893,22 +1043,80 @@ namespace AutoGamepad
             });
         }
 
-        // Evento que ocorre quando o usuário clica no "X" para fechar a janela
-        protected override void OnFormClosing(FormClosingEventArgs e)
+        // Evento que ocorre quando o usuário clica no "X" para fechar a janela.
+        protected override async void OnFormClosing(FormClosingEventArgs e)
         {
-            // Cancela o motor antes de neutralizar e desconectar o dispositivo.
-            _cancellationTokenSource?.Cancel();
+            if (_shutdownCompleted)
+            {
+                base.OnFormClosing(e);
+                return;
+            }
+
+            e.Cancel = true;
+            if (_shutdownInProgress
+                || !ConfirmSaveChanges("fechar o AutoGamepad"))
+            {
+                return;
+            }
+
+            _shutdownInProgress = true;
+            Enabled = false;
+            UseWaitCursor = true;
+
+            try
+            {
+                await ShutdownAsync();
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERRO] Falha inesperada durante o encerramento: {ex.Message}");
+            }
+            finally
+            {
+                _shutdownCompleted = true;
+                _shutdownInProgress = false;
+                UseWaitCursor = false;
+            }
+
+            Close();
+        }
+
+        private async Task ShutdownAsync()
+        {
+            Log("Encerrando o AutoGamepad com segurança...");
+
+            _globalHotkeys?.Dispose();
+            _globalHotkeys = null;
+
+            CancellationTokenSource? cancellationSource = _cancellationTokenSource;
+            Task? automationTask = _automationTask;
+            cancellationSource?.Cancel();
+
+            bool engineCompleted = await ShutdownTaskWaiter.WaitForCompletionAsync(
+                automationTask,
+                SHUTDOWN_TIMEOUT);
+            if (!engineCompleted)
+            {
+                Log(
+                    $"[AVISO] O motor não encerrou em {SHUTDOWN_TIMEOUT.TotalSeconds:0} segundos. " +
+                    "Aplicando neutralização de emergência.");
+            }
+
             TryResetControllerState();
-            DisconnectController();
-
-            // Devolve as teclas pro Windows ao fechar o programa
-            UnregisterHotKey(this.Handle, HOTKEY_ID_START);
-            UnregisterHotKey(this.Handle, HOTKEY_ID_STOP);
-
-            // Salva qualquer mensagem de Log que sobrou perdida na memória.
+            TryDisconnectController();
             FlushLogToDisk();
+        }
 
-            base.OnFormClosing(e);
+        private void TryDisconnectController()
+        {
+            try
+            {
+                DisconnectController();
+            }
+            catch (Exception ex)
+            {
+                Log($"[ERRO] Não foi possível desconectar o controle durante o encerramento: {ex.Message}");
+            }
         }
 
         private void chkConnect_CheckedChanged(object sender, EventArgs e)
@@ -1056,12 +1264,15 @@ namespace AutoGamepad
 
             _sequenceNeedsValidation = true;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
             return row;
         }
 
         // --- BOTÃO: REMOVER LINHA ---
         private void btnRowRemove_Click(object sender, EventArgs e)
         {
+            bool removedRow = false;
+
             // Verifica se o usuário selecionou alguma linha
             if (gridSequence.SelectedRows.Count > 0)
             {
@@ -1072,14 +1283,19 @@ namespace AutoGamepad
                     gridSequence.Rows.Count,
                     rowIndex);
                 SelectSequenceRow(selectionIndex);
+                removedRow = true;
             }
             else
             {
                 // Se a pessoa só clicou numa célula e não na linha inteira, avisa ela
                 MessageBox.Show("Selecione uma linha inteira (clicando na margem esquerda da tabela) para remover.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            _sequenceNeedsValidation = true;
-            UpdateTimeEstimates();
+            if (removedRow)
+            {
+                _sequenceNeedsValidation = true;
+                UpdateTimeEstimates();
+                _profileDocumentState.MarkDirty();
+            }
         }
 
         private void SelectSequenceRow(int? rowIndex)
@@ -1119,6 +1335,7 @@ namespace AutoGamepad
 
             _sequenceNeedsValidation = true;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         private void ConfigureSequenceRow(DataGridViewRow row, bool configureButtonOptions)
@@ -1184,6 +1401,10 @@ namespace AutoGamepad
                 DataGridViewCell cellTimeMin = row.Cells["colMinTime"];
                 DataGridViewCell cellTimeMax = row.Cells["colMaxTime"];
                 DataGridViewCell cellJitter = row.Cells["colJitter"];
+                bool isAxisValueEditable = SequenceGridRules.IsAxisValueEditable(action, isAxis);
+                bool isRampEditable = SequenceGridRules.IsRampEditable(action, isAxis);
+                bool isDurationEditable = SequenceGridRules.IsDurationEditable(action);
+                bool isJitterEditable = SequenceGridRules.IsJitterEditable(action, isAxis);
 
                 static void SetCellState(DataGridViewCell cell, bool enabled, string defaultValue = "-")
                 {
@@ -1217,32 +1438,32 @@ namespace AutoGamepad
 
                     case ActionType.PressAndRelease:
                         SetCellState(cellMessage, false);
-                        SetCellState(cellValue, isAxis, "100");
-                        SetCellState(cellRampMin, isAxis, "0");
-                        SetCellState(cellRampMax, isAxis, "0");
-                        SetCellState(cellTimeMin, true, "100");
-                        SetCellState(cellTimeMax, true, "100");
-                        SetCellState(cellJitter, isAxis, "0");
+                        SetCellState(cellValue, isAxisValueEditable, "100");
+                        SetCellState(cellRampMin, isRampEditable, "0");
+                        SetCellState(cellRampMax, isRampEditable, "0");
+                        SetCellState(cellTimeMin, isDurationEditable, "100");
+                        SetCellState(cellTimeMax, isDurationEditable, "100");
+                        SetCellState(cellJitter, isJitterEditable, "0");
                         break;
 
                     case ActionType.Hold:
                         SetCellState(cellMessage, false);
-                        SetCellState(cellValue, isAxis, "100");
-                        SetCellState(cellRampMin, isAxis, "0");
-                        SetCellState(cellRampMax, isAxis, "0");
-                        SetCellState(cellTimeMin, false);
-                        SetCellState(cellTimeMax, false);
-                        SetCellState(cellJitter, isAxis, "0");
+                        SetCellState(cellValue, isAxisValueEditable, "100");
+                        SetCellState(cellRampMin, isRampEditable, "0");
+                        SetCellState(cellRampMax, isRampEditable, "0");
+                        SetCellState(cellTimeMin, isDurationEditable);
+                        SetCellState(cellTimeMax, isDurationEditable);
+                        SetCellState(cellJitter, isJitterEditable, "0");
                         break;
 
                     case ActionType.Release:
                         SetCellState(cellMessage, false);
                         SetCellState(cellValue, false);
-                        SetCellState(cellRampMin, isAxis, "0");
-                        SetCellState(cellRampMax, isAxis, "0");
-                        SetCellState(cellTimeMin, false);
-                        SetCellState(cellTimeMax, false);
-                        SetCellState(cellJitter, false);
+                        SetCellState(cellRampMin, isRampEditable, "0");
+                        SetCellState(cellRampMax, isRampEditable, "0");
+                        SetCellState(cellTimeMin, isDurationEditable);
+                        SetCellState(cellTimeMax, isDurationEditable);
+                        SetCellState(cellJitter, isJitterEditable, "0");
                         break;
                 }
             }
@@ -1327,10 +1548,21 @@ namespace AutoGamepad
 
             if (colName == "colValue" || colName == "colRampMin" || colName == "colRampMax" || colName == "colMinTime" || colName == "colMaxTime" || colName == "colJitter")
             {
+                DataGridViewCell cell = gridSequence.Rows[e.RowIndex].Cells[e.ColumnIndex];
+                if (cell.ReadOnly)
+                {
+                    return;
+                }
+
                 // Pega o valor com segurança contra nulos
                 string newText = e.FormattedValue?.ToString() ?? "";
 
-                if (newText == "-" || newText == "") return;
+                if (string.IsNullOrWhiteSpace(newText) || newText.Trim() == "-")
+                {
+                    e.Cancel = true;
+                    MessageBox.Show("Este campo é obrigatório. Informe um número inteiro.", "Valor Obrigatório", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
 
                 // Tenta converter para número
                 if (!int.TryParse(newText, out int numericValue))
@@ -1340,13 +1572,13 @@ namespace AutoGamepad
                     return; // Para a validação aqui se não for número
                 }
 
-                // REGRA 1: Coluna de Força do Eixo (0 a 100%)
+                // REGRA 1: Coluna de Força do Eixo (1 a 100%)
                 if (colName == "colValue")
                 {
-                    if (numericValue < 0 || numericValue > 100)
+                    if (!SequenceNumericRules.IsAxisMagnitudeValid(numericValue))
                     {
                         e.Cancel = true;
-                        MessageBox.Show("O valor do Eixo/Gatilho deve estar entre 0 e 100%.", "Limite Excedido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        MessageBox.Show("O valor do Eixo/Gatilho deve estar entre 1 e 100%.", "Limite Excedido", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                 }
 
@@ -1407,6 +1639,7 @@ namespace AutoGamepad
 
             _sequenceNeedsValidation = true;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         // --- VALIDADOR LÓGICO DE SEQUÊNCIA ---
@@ -1515,71 +1748,78 @@ namespace AutoGamepad
                     }
                 }
 
-                // O traço representa uma célula desabilitada. Qualquer outro texto precisa caber em Int32.
-                bool validMinTime = TryReadNumericCell(row, "colMinTime", out int minTime);
-                bool validMaxTime = TryReadNumericCell(row, "colMaxTime", out int maxTime);
+                if (SequenceGridRules.IsDurationEditable(actionType))
+                {
+                    bool validMinTime = TryReadNumericCell(row, "colMinTime", out int minTime);
+                    bool validMaxTime = TryReadNumericCell(row, "colMaxTime", out int maxTime);
 
-                if (!validMinTime || !validMaxTime)
-                {
-                    MarkRowAsError(row, "O Tempo de Duração excede o limite numérico permitido.");
-                    isValid = false;
-                }
-                else if (minTime < 0 || maxTime < 0)
-                {
-                    MarkRowAsError(row, "O Tempo de Duração não pode ser negativo.");
-                    isValid = false;
-                }
-                else if (minTime > maxTime)
-                {
-                    MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
-                    isValid = false;
-                }
-
-                bool validRampMin = TryReadNumericCell(row, "colRampMin", out int rampMin);
-                bool validRampMax = TryReadNumericCell(row, "colRampMax", out int rampMax);
-
-                if (!validRampMin || !validRampMax)
-                {
-                    MarkRowAsError(row, "O Tempo de Rampa excede o limite numérico permitido.");
-                    isValid = false;
-                }
-                else if (rampMin < 0 || rampMax < 0)
-                {
-                    MarkRowAsError(row, "O Tempo de Rampa não pode ser negativo.");
-                    isValid = false;
-                }
-                else if (rampMin > rampMax)
-                {
-                    MarkRowAsError(row, "A Rampa Mínima não pode ser maior que a Rampa Máxima.");
-                    isValid = false;
+                    if (!validMinTime || !validMaxTime)
+                    {
+                        MarkRowAsError(row, "O Tempo de Duração é obrigatório e deve ser um número inteiro válido.");
+                        isValid = false;
+                    }
+                    else if (minTime < 0 || maxTime < 0)
+                    {
+                        MarkRowAsError(row, "O Tempo de Duração não pode ser negativo.");
+                        isValid = false;
+                    }
+                    else if (minTime > maxTime)
+                    {
+                        MarkRowAsError(row, "O Tempo Mínimo não pode ser maior que o Tempo Máximo.");
+                        isValid = false;
+                    }
                 }
 
-                bool validJitter = TryReadNumericCell(row, "colJitter", out int jitterForce);
-                if (!validJitter)
+                if (SequenceGridRules.IsRampEditable(actionType, isAxis))
                 {
-                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) excede o limite numérico permitido.");
-                    isValid = false;
-                }
-                else if (jitterForce < 0)
-                {
-                    MarkRowAsError(row, "O Tremor de Eixo (Jitter) não pode ser negativo.");
-                    isValid = false;
+                    bool validRampMin = TryReadNumericCell(row, "colRampMin", out int rampMin);
+                    bool validRampMax = TryReadNumericCell(row, "colRampMax", out int rampMax);
+
+                    if (!validRampMin || !validRampMax)
+                    {
+                        MarkRowAsError(row, "O Tempo de Rampa é obrigatório e deve ser um número inteiro válido.");
+                        isValid = false;
+                    }
+                    else if (rampMin < 0 || rampMax < 0)
+                    {
+                        MarkRowAsError(row, "O Tempo de Rampa não pode ser negativo.");
+                        isValid = false;
+                    }
+                    else if (rampMin > rampMax)
+                    {
+                        MarkRowAsError(row, "A Rampa Mínima não pode ser maior que a Rampa Máxima.");
+                        isValid = false;
+                    }
                 }
 
-                // Checagem Lógica: Manter eixo em 0% ou maior que 100%
-                if (isAxis)
+                if (SequenceGridRules.IsJitterEditable(actionType, isAxis))
+                {
+                    bool validJitter = TryReadNumericCell(row, "colJitter", out int jitterForce);
+                    if (!validJitter)
+                    {
+                        MarkRowAsError(row, "O Tremor de Eixo (Jitter) é obrigatório e deve ser um número inteiro válido.");
+                        isValid = false;
+                    }
+                    else if (jitterForce < 0)
+                    {
+                        MarkRowAsError(row, "O Tremor de Eixo (Jitter) não pode ser negativo.");
+                        isValid = false;
+                    }
+                }
+
+                // Tap e Hold de eixo precisam de magnitude explícita entre 1% e 100%.
+                if (SequenceGridRules.IsAxisValueEditable(actionType, isAxis))
                 {
                     bool validAxisValue = TryReadNumericCell(row, "colValue", out int axisValue);
 
-                    if (!validAxisValue || axisValue < 0 || axisValue > 100)
+                    if (!validAxisValue)
                     {
-                        MarkRowAsError(row, "O Valor do Eixo deve estar entre 0% e 100%.");
+                        MarkRowAsError(row, "O Valor do Eixo é obrigatório e deve ser um número inteiro.");
                         isValid = false;
                     }
-
-                    if (actionType == ActionType.Hold && axisValue == 0)
+                    else if (!SequenceNumericRules.IsAxisMagnitudeValid(axisValue))
                     {
-                        MarkRowAsError(row, "Manter um Eixo em 0% não tem efeito lógico. Use a ação 'Soltar'.");
+                        MarkRowAsError(row, "O Valor do Eixo deve estar entre 1% e 100%.");
                         isValid = false;
                     }
                 }
@@ -1600,14 +1840,14 @@ namespace AutoGamepad
 
         private static bool TryReadNumericCell(DataGridViewRow row, string columnName, out int value)
         {
-            string text = row.Cells[columnName].Value?.ToString() ?? "";
-            if (string.IsNullOrWhiteSpace(text) || text == "-")
+            DataGridViewCell cell = row.Cells[columnName];
+            if (cell.ReadOnly)
             {
                 value = 0;
                 return true;
             }
 
-            return int.TryParse(text, out value);
+            return SequenceNumericRules.TryParseRequired(cell.Value?.ToString(), out value);
         }
 
         // Pinta a linha de vermelho, coloca o ícone e avisa no Log
@@ -1624,35 +1864,132 @@ namespace AutoGamepad
         {
             numMaxCycles.Enabled = chkLimitCycles.Checked;
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         private void numMaxCycles_ValueChanged(object sender, EventArgs e)
         {
             UpdateTimeEstimates();
+            _profileDocumentState.MarkDirty();
         }
 
         private void chkEnableJitter_CheckedChanged(object sender, EventArgs e)
         {
-            // Ativa ou desativa a caixa de Frequência quando o usuário marca/desmarca o Jitter
-            numJitterFreq.Enabled = chkEnableJitter.Checked;
+            UpdateJitterFrequencyState();
+            _profileDocumentState.MarkDirty();
+        }
+
+        private void numJitterFreq_ValueChanged(object sender, EventArgs e)
+        {
+            _profileDocumentState.MarkDirty();
+        }
+
+        private void UpdateJitterFrequencyState()
+        {
+            numJitterFreq.Enabled = chkEnableJitter.Enabled && chkEnableJitter.Checked;
+        }
+
+        private bool HasUnsavedProfileChanges =>
+            _profileDocumentState.IsDirty || _jsonHasUnappliedChanges;
+
+        private void UpdateWindowTitle()
+        {
+            string dirtyMarker = HasUnsavedProfileChanges ? " *" : "";
+            Text = $"AutoGamepad — {_profileDocumentState.DisplayName}{dirtyMarker}";
+        }
+
+        private void SetJsonEditorText(string json)
+        {
+            _isSynchronizingJsonEditor = true;
+            try
+            {
+                txtJsonCode.Text = json;
+                _jsonHasUnappliedChanges = false;
+            }
+            finally
+            {
+                _isSynchronizingJsonEditor = false;
+            }
+
+            UpdateWindowTitle();
+        }
+
+        private void txtJsonCode_TextChanged(object sender, EventArgs e)
+        {
+            if (_isSynchronizingJsonEditor)
+            {
+                return;
+            }
+
+            _jsonHasUnappliedChanges = true;
+            UpdateWindowTitle();
         }
 
         // --- DETECTA MUDANÇA DE ABA (Tabela <-> Código) ---
         private void tabEditor_SelectedIndexChanged(object sender, EventArgs e)
         {
-            // Se o usuário foi para a Aba 1 (Índice 1 = A aba de Código)
-            if (tabEditor.SelectedIndex == 1)
+            if (_isChangingEditorTab)
             {
-                // Verifica se a tabela tem erros matemáticos primeiro
+                return;
+            }
+
+            if (tabEditor.SelectedTab == tabPage2)
+            {
                 if (!ValidateSequence())
                 {
-                    MessageBox.Show("Corrija os erros na tabela antes de visualizar o código.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    tabEditor.SelectedIndex = 0; // Joga ele de volta pra tabela
+                    MessageBox.Show(
+                        "Corrija os erros na tabela antes de visualizar o código.",
+                        "Aviso",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    SelectEditorTab(tabPage1);
                     return;
                 }
 
-                // Tabela OK! Gera o texto JSON e joga na caixa preta
-                txtJsonCode.Text = ExportProfileToJson();
+                SetJsonEditorText(ExportProfileToJson());
+                return;
+            }
+
+            if (tabEditor.SelectedTab == tabPage1 && _jsonHasUnappliedChanges)
+            {
+                DialogResult result = MessageBox.Show(
+                    "O código JSON possui alterações que ainda não foram aplicadas à tabela.\n\n" +
+                    "Sim: aplicar à tabela\n" +
+                    "Não: descartar as alterações do código\n" +
+                    "Cancelar: continuar editando o código",
+                    "Alterações no código JSON",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question);
+
+                if (result == DialogResult.Yes)
+                {
+                    if (!TryApplyJsonEditorChanges(showResultMessage: false))
+                    {
+                        SelectEditorTab(tabPage2);
+                    }
+                }
+                else if (result == DialogResult.No)
+                {
+                    _jsonHasUnappliedChanges = false;
+                    UpdateWindowTitle();
+                }
+                else
+                {
+                    SelectEditorTab(tabPage2);
+                }
+            }
+        }
+
+        private void SelectEditorTab(TabPage tabPage)
+        {
+            _isChangingEditorTab = true;
+            try
+            {
+                tabEditor.SelectedTab = tabPage;
+            }
+            finally
+            {
+                _isChangingEditorTab = false;
             }
         }
 
@@ -1678,100 +2015,219 @@ namespace AutoGamepad
         // --- BOTÃO CHECAR SINTAXE (Aba JSON) ---
         private void btnJsonValidate_Click(object sender, EventArgs e)
         {
-            // Tenta importar. Passamos 'true' pois é só um Preview (não queremos o popup de sucesso do import)
-            bool success = ImportProfileFromJson(txtJsonCode.Text, true);
+            TryApplyJsonEditorChanges(showResultMessage: true);
+        }
 
-            if (success)
+        private bool TryApplyJsonEditorChanges(bool showResultMessage)
+        {
+            if (!ImportProfileFromJson(txtJsonCode.Text, isPreview: true))
             {
-                // Se a sintaxe JSON tava certa, roda o validador lógico pra checar os negativos
-                if (!ValidateSequence())
+                MessageBox.Show(
+                    "O JSON é inválido ou contém ações e controles desconhecidos. " +
+                    "A tabela não foi substituída.",
+                    "Erro no JSON",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return false;
+            }
+
+            _jsonHasUnappliedChanges = false;
+            _profileDocumentState.MarkDirty();
+            UpdateWindowTitle();
+
+            bool isValid = ValidateSequence();
+            if (showResultMessage)
+            {
+                if (isValid)
                 {
-                    MessageBox.Show("Sintaxe JSON correta, mas existem ERROS LÓGICOS (Tempo negativo, ordens inválidas). Corrija na Tabela Visual.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(
+                        "Sintaxe JSON e lógica válidas. A tabela visual foi atualizada.",
+                        "Validado",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
                 }
                 else
                 {
-                    MessageBox.Show("Sintaxe JSON e Lógica Perfeitas! A tabela visual foi atualizada.", "Validado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    MessageBox.Show(
+                        "A sintaxe JSON está correta, mas existem erros lógicos ou campos obrigatórios inválidos. " +
+                        "Corrija as linhas marcadas na tabela.",
+                        "Aviso",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
                 }
             }
-            else
+
+            return true;
+        }
+
+        // --- BOTÕES SALVAR / SALVAR COMO ---
+        private void btnSaveProfile_Click(object sender, EventArgs e)
+        {
+            SaveCurrentProfile();
+        }
+
+        private void btnSaveProfileAs_Click(object sender, EventArgs e)
+        {
+            SaveProfileAs();
+        }
+
+        private bool SaveCurrentProfile()
+        {
+            return string.IsNullOrEmpty(_profileDocumentState.FilePath)
+                ? SaveProfileAs()
+                : SaveProfileToPath(_profileDocumentState.FilePath);
+        }
+
+        private bool SaveProfileAs()
+        {
+            using var dialog = new SaveFileDialog
             {
-                MessageBox.Show("Erro de Sintaxe no JSON! Verifique se você não apagou vírgulas ou chaves '{}'.", "Erro Fatal", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json",
+                Title = "Salvar Perfil de Automação como",
+                AddExtension = true,
+                DefaultExt = "json",
+                FileName = string.IsNullOrEmpty(_profileDocumentState.FilePath)
+                    ? "MeuPerfil.json"
+                    : Path.GetFileName(_profileDocumentState.FilePath)
+            };
+
+            if (!string.IsNullOrEmpty(_profileDocumentState.FilePath))
+            {
+                dialog.InitialDirectory = Path.GetDirectoryName(_profileDocumentState.FilePath);
+            }
+
+            return dialog.ShowDialog() == DialogResult.OK
+                && SaveProfileToPath(dialog.FileName);
+        }
+
+        private bool SaveProfileToPath(string filePath)
+        {
+            if (!TryCreateProfileJsonForSave(out string jsonContent))
+            {
+                return false;
+            }
+
+            try
+            {
+                ProfileFileWriter.WriteAllTextSafely(filePath, jsonContent);
+                SetJsonEditorText(jsonContent);
+                _profileDocumentState.MarkSaved(filePath);
+                MessageBox.Show(
+                    "Perfil salvo com sucesso!",
+                    "Sucesso",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Information);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Não foi possível salvar o perfil. O arquivo anterior foi preservado.\n\n{ex.Message}",
+                    "Erro de Gravação",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+                return false;
             }
         }
 
-        // --- BOTÃO: SALVAR PERFIL (GERA O ARQUIVO .JSON) ---
-        private void btnSaveProfile_Click(object sender, EventArgs e)
+        private bool TryCreateProfileJsonForSave(out string jsonContent)
         {
-            // Roda o validador lógico primeiro (Avisa o usuário, mas não o impede de salvar com erros)
+            jsonContent = "";
+
+            if (_jsonHasUnappliedChanges
+                && !TryApplyJsonEditorChanges(showResultMessage: false))
+            {
+                return false;
+            }
+
             if (!ValidateSequence())
             {
-                var dialogResult = MessageBox.Show("Sua sequência possui ERROS LÓGICOS (linhas vermelhas). Se salvar assim, não será possível iniciar a automação depois.\n\nDeseja salvar o arquivo mesmo assim?", "Aviso de Validação", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                DialogResult result = MessageBox.Show(
+                    "Sua sequência possui erros e não poderá ser executada enquanto eles existirem.\n\n" +
+                    "Deseja salvar o arquivo mesmo assim?",
+                    "Aviso de Validação",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning);
 
-                if (dialogResult == DialogResult.No) return; // O cara desistiu de salvar
-            }
-
-            // Pega o texto da tabela convertido em JSON
-            string jsonContent = ExportProfileToJson();
-
-            // Abre a janela do Windows para salvar o arquivo
-            using (SaveFileDialog sfd = new SaveFileDialog())
-            {
-                sfd.Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json";
-                sfd.Title = "Salvar Perfil de Automação";
-                sfd.FileName = "MeuPerfil.json"; // Sugestão de nome
-
-                if (sfd.ShowDialog() == DialogResult.OK)
+                if (result != DialogResult.Yes)
                 {
-                    try
-                    {
-                        // Escreve o texto gerado no arquivo escolhido
-                        File.WriteAllText(sfd.FileName, jsonContent);
-                        MessageBox.Show("Perfil salvo com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Erro ao tentar salvar o arquivo: {ex.Message}", "Erro de Gravação", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    return false;
                 }
             }
+
+            jsonContent = ExportProfileToJson();
+            return true;
+        }
+
+        private bool ConfirmSaveChanges(string operation)
+        {
+            if (!HasUnsavedProfileChanges)
+            {
+                return true;
+            }
+
+            DialogResult result = MessageBox.Show(
+                $"Existem alterações não salvas em '{_profileDocumentState.DisplayName}'.\n\n" +
+                $"Deseja salvá-las antes de {operation}?",
+                "Alterações não salvas",
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Warning);
+
+            return result switch
+            {
+                DialogResult.Yes => SaveCurrentProfile(),
+                DialogResult.No => true,
+                _ => false
+            };
         }
 
         // --- BOTÃO: CARREGAR PERFIL (LÊ O ARQUIVO .JSON) ---
         private void btnLoadProfile_Click(object sender, EventArgs e)
         {
-            // Abre a janela do Windows para buscar o arquivo
-            using (OpenFileDialog ofd = new OpenFileDialog())
+            using var dialog = new OpenFileDialog
             {
-                ofd.Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json";
-                ofd.Title = "Carregar Perfil de Automação";
+                Filter = "Arquivos JSON do AutoGamepad (*.json)|*.json",
+                Title = "Carregar Perfil de Automação"
+            };
 
-                if (ofd.ShowDialog() == DialogResult.OK)
+            if (dialog.ShowDialog() != DialogResult.OK
+                || !ConfirmSaveChanges("abrir outro perfil"))
+            {
+                return;
+            }
+
+            try
+            {
+                string jsonContent = File.ReadAllText(dialog.FileName);
+                bool success = ImportProfileFromJson(jsonContent, isPreview: false);
+
+                if (success)
                 {
-                    try
-                    {
-                        // Lê o texto do arquivo
-                        string jsonContent = File.ReadAllText(ofd.FileName);
-
-                        // Tenta jogar pra tabela usando a função que já fizemos
-                        // Passamos 'false' pra avisar que é um import real, assim ele roda a validação pesada
-                        bool success = ImportProfileFromJson(jsonContent, false);
-
-                        if (success)
-                        {
-                            // Joga o texto lido na aba Código também para sincronizar a tela
-                            txtJsonCode.Text = jsonContent;
-                            MessageBox.Show("Perfil carregado com sucesso!", "Sucesso", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        }
-                        else
-                        {
-                            MessageBox.Show("O arquivo selecionado está corrompido ou possui formatação JSON inválida. O Perfil não pôde ser carregado.", "Erro Crítico", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        MessageBox.Show($"Erro ao tentar abrir o arquivo: {ex.Message}", "Erro de Leitura", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    }
+                    SetJsonEditorText(jsonContent);
+                    _profileDocumentState.MarkSaved(dialog.FileName);
+                    MessageBox.Show(
+                        "Perfil carregado com sucesso!",
+                        "Sucesso",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
                 }
+                else
+                {
+                    MessageBox.Show(
+                        "O arquivo selecionado está corrompido, possui JSON inválido ou contém valores desconhecidos. " +
+                        "O perfil não pôde ser carregado.",
+                        "Erro Crítico",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Error);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    $"Erro ao tentar abrir o arquivo: {ex.Message}",
+                    "Erro de Leitura",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
             }
         }
     }
@@ -1797,11 +2253,17 @@ namespace AutoGamepad
         public string Button { get; set; } = "";
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Message { get; set; }
-        public int ValuePercent { get; set; }
-        public int RampMin { get; set; }
-        public int RampMax { get; set; }
-        public int WaitMin { get; set; }
-        public int WaitMax { get; set; }
-        public int JitterForce { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? ValuePercent { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? RampMin { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? RampMax { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitMin { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? WaitMax { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? JitterForce { get; set; }
     }
 }
